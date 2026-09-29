@@ -170,7 +170,7 @@ const char *const *progression_fry_tip(int kind);
  * detected in progression_tick from what the tank already counts - a MEAL
  * (player_feedings), a stage reached (MS_REACHED_*), a birth (do_arrival),
  * full trust (10.0, once per fish), every SD_CHORE_EVERY algae colonies
- * removed and inches of grass trimmed (tank.c's counters) - and the ledger
+ * removed and every SD_TRIM_CM of grass trimmed (tank.c's counters) - and the ledger
  * in tank_t (sd_paid_fish, sd_colonies_paid, sd_inches_paid) keeps a save
  * from paying twice. A tank saved before the shop is paid what it already
  * earned on its first boot with it, once (Strato: "yes, pay it once"). */
@@ -180,8 +180,12 @@ const char *const *progression_fry_tip(int kind);
 #define SD_STAGE_ELDER 25
 #define SD_BIRTH       20
 #define SD_TRUST       15
-#define SD_CHORE       25          /* per SD_CHORE_EVERY colonies / inches */
+#define SD_CHORE       25          /* per SD_CHORE_EVERY colonies / SD_TRIM_CM of grass */
 #define SD_CHORE_EVERY 100
+/* the grass pays by length cut: 250 cm (2026-09-29, Strato; was 100 inches =
+ * 254 cm). The HOW TO EARN line names it - "100 IN OF GRASS CUT" read as the
+ * word "in" to a UK keeper (issue #9), and no unit read as 25 for any trim */
+#define SD_TRIM_CM     250
 #define SD_PRICE_PLANT 40
 #define SD_PRICE_SNAIL 80
 #define SD_PRICE_CASTLE 150

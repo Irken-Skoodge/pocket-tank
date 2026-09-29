@@ -195,8 +195,8 @@ done, the parents court in the grass and the fry is born within the minute.
 them on things for the tank. A meal the fish eat from your hand pays 2; a
 fish growing up pays 5, 10 and 25 for juvenile, adult and elder; a fry
 born 20; a fish that comes to trust you completely 15; every hundred algae
-colonies you wipe away pay 25, and so does keeping the grass trimmed,
-again and again. Nothing is ever needed and nothing is lost: a tank with no
+colonies you wipe away pay 25, and so does every 250 cm of grass you
+cut, again and again. Nothing is ever needed and nothing is lost: a tank with no
 sand dollars is exactly the tank there was before. The coin on the
 milestones page's TANK row shows your balance, and it (or the UPGRADES
 button) opens the shop: a row per item with its price, UNLOCK when you can

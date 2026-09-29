@@ -266,13 +266,14 @@ typedef struct tank {
     /* the chore counters behind the sand dollars (2026-09-15): a COLONY is a
      * connected patch of film the keeper's wipe took the last cell of (the
      * snail's grazing never counts); trim_px is frond length actually cut,
-     * PX_PER_INCH to the inch. Both saved. */
+     * PX_PER_CM to the centimeter. Both saved. */
     int32_t  algae_colonies;
     float    trim_px;
     /* sand dollars (progression.c owns the economy; tank.c reads the unlocks):
      * the balance, the lifetime total, what the shop has sold (SD_ITEM_*),
      * and the ledger that keeps an award from paying twice - per fish (bits
-     * SD_PAID_*), and how many hundreds of colonies / inches have been paid.
+     * SD_PAID_*), and how many payouts of colonies / grass have been made
+     * (sd_inches_paid: named for the inches it counted until 2026-09-29).
      * All saved. */
     int32_t  sd_balance, sd_earned;
     uint32_t sd_unlocks;
@@ -533,6 +534,7 @@ enum { SD_ITEM_PLANT = 1u << 0, SD_ITEM_SNAIL = 1u << 1, SD_ITEM_CASTLE = 1u << 
 /* per-fish paid bits (sd_paid_fish) */
 enum { SD_PAID_JUV = 1u << 0, SD_PAID_ADULT = 1u << 1, SD_PAID_ELDER = 1u << 2, SD_PAID_TRUST = 1u << 3 };
 #define PX_PER_INCH 24.0f          /* the tank reads as ~15 in tall; a fish ~1.7 in */
+#define PX_PER_CM   (PX_PER_INCH / 2.54f)   /* the shop pays grass by the centimeter (SD_TRIM_CM) */
 /* the live bed count: VEG_BEDS, or VEG_BEDS_MAX with the sword plant bought;
  * every loop over beds runs to this. tank_veg_kind is the species (render). */
 int   tank_veg_beds(const tank_t *t);

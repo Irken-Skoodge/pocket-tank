@@ -1580,6 +1580,66 @@ static void write_ppm(const char *path, const uint16_t *fb) {
     }
     fclose(f);
 }
+/* --hero <prefix>: pocketank.com's glamor shot (2026-09-29, Strato: the site's
+ * frames caught fish "mid-flip and they look flat"). One render catches the
+ * side-on roll (render.c g_roll) still easing in from flat, so the fish are
+ * posed side-on and the frame rendered until the roll has settled. Three
+ * grown fish, the castle, the coral and the reef cluster in full bloom, tidy
+ * grass, clean glass; <prefix>_hero.ppm and <prefix>_hero_card.ppm (the stats card). */
+typedef struct { int preset; stage_t stage; float x, y, heading; } hero_fish_t;
+static int hero_shot(const char *prefix) {
+    static const hero_fish_t CAST[] = {
+        { 0, STAGE_ELDER, 244, 150,  3.14159f - 0.06f },   /* mira: teal, the logo's fish, center stage */
+        { 3, STAGE_ADULT, 104, 122,  0.10f },              /* nori: violet, upper left, heading in */
+        { 1, STAGE_ADULT, 330, 323,  3.14159f },           /* bolt: coral red, through the castle arch */
+    };
+    const int n = (int)(sizeof CAST / sizeof CAST[0]);
+    tank_init(&tank, 2024);
+    tank_new_population(&tank);
+    for (int i = 0; i < n; i++) tank_make_fish(&tank, i, CAST[i].preset, 0.6f, 0.6f, CAST[i].stage);
+    tank.n_fish = n;
+    for (int i = 0; i < n; i++) {
+        tank.fish[i].eaten = 60;                          /* well fed: the size bonus */
+        progression_set_age(&tank, i, CAST[i].stage == STAGE_ELDER ? STAGE_ELDER_AGE + 1 : STAGE_ADULT_AGE + 1);
+        tank.fish[i].hunger = 2; tank.fish[i].stress = 1; tank.fish[i].energy = 8;
+    }
+    /* the card's fish is an old friend: trusting, and its traits seen (render.c
+       reveals a slider once its behaviour has been: the dart, the follow, the reef) */
+    tank.fish[0].ms_bits |= MS_FIRST_DART | MS_FIRST_FOLLOW | MS_FIRST_REEF;
+    tank.fish[0].trust = 8.5f; tank.fish[0].bold = 0.72f; tank.fish[0].sociable = 0.4f; tank.fish[0].curiosity = 7.5f;
+    tank.sd_unlocks |= SD_ITEM_CASTLE | SD_ITEM_CORAL | SD_ITEM_CLUSTER;
+    tank_castle_place(&tank); tank_coral_place(&tank); tank_cluster_place(&tank);
+    tank_decor_set(&tank, 2, 336, DECOR_Z_FRONT);                        /* the castle, right */
+    tank_decor_set(&tank, 3, 208, DECOR_Z_FRONT);                        /* the coral in gold (the logo's sand dollar) */
+    tank_coral_set_rgb(&tank, CORAL_PAL[7]); tank.coral_growth = CORAL_FULL;
+    tank_decor_set(&tank, 4, 92, DECOR_Z_FRONT);                         /* the reef cluster in bloom, left */
+    tank_cluster_set_scheme(&tank, 0); tank.cluster_growth = CLUSTER_FULL;
+    for (int i = 0; i < 12 * 60; i++) tank_tick(&tank, 1.0f / 60.0f, advisor_rules);   /* bubbles up the column */
+    tank_veg_set(&tank, 0, 0.62f); tank_veg_set(&tank, 1, 0.5f); tank_veg_set(&tank, 2, 0.7f);
+    memset(tank.algae, 0, sizeof tank.algae);
+    tank.night = false; for (int i = 0; i < MAX_FOOD; i++) tank.food[i].alive = false;
+    static uint16_t fb[TANK_W * TANK_H], scene[TANK_W * TANK_H];
+    render_set_scene_cache(scene);
+    render_set_vignette_cache(vig_buf);
+    render_set_card_cache(card_buf);
+    render_set_dirty_mask(dirty_buf);
+    for (int k = 0; k < 90; k++) {                       /* the pose held while the roll settles side-on */
+        for (int i = 0; i < n; i++) {
+            fish_t *f = &tank.fish[i];
+            f->x = CAST[i].x; f->y = CAST[i].y; f->heading = CAST[i].heading;
+            f->speed = f->target_speed = 38; f->hesitate = 0;
+        }
+        tank.clock += 1.0f / 60.0f;
+        render_tank(&tank, fb, TANK_W);
+    }
+    char path[512];
+    snprintf(path, sizeof path, "%s_hero.ppm", prefix); write_ppm(path, fb);
+    render_tank(&tank, fb, TANK_W); render_stats_card(&tank, 0, fb, TANK_W);
+    snprintf(path, sizeof path, "%s_hero_card.ppm", prefix); write_ppm(path, fb);
+    printf("hero: wrote %s_hero.ppm, %s_hero_card.ppm\n", prefix, prefix);
+    return 0;
+}
+
 static int snapshot(const char *prefix, int seconds) {
     tank_init(&tank, 2024);
     tank_new_population(&tank);
@@ -1977,7 +2037,7 @@ static int selftest_battery(void) {
 /* --selftest-shop (2026-09-15): the sand dollars. A fresh tank has none; a
  * feeding pays only once somebody eats from it; stages, a birth and full
  * trust pay once each, and a save round-trip never pays again; the two chore
- * counters (colonies wiped, inches cut) pay every hundred; the shop refuses
+ * counters (colonies wiped, grass cut) pay every hundred / 250 cm; the shop refuses
  * a short balance, the plant becomes bed 3 (the slash cuts it, the comfort
  * band counts it), the snail grazes without touching the keeper's counts;
  * the page's taps; the save carries all of it; a pre-shop save back-pays. */
@@ -2048,19 +2108,19 @@ static int selftest_shop(void) {
         if (tank.sd_colonies_paid != 1) { printf("FAIL: colonies paid count %d\n", tank.sd_colonies_paid); return 1; }
         printf("selftest-shop: 3 patches = 3 colonies, a half patch none, the 100th paid %d\n", SD_CHORE);
     }
-    /* inches: a full bed mowed to nubs is (1 - nub) x the frond height, per frond */
+    /* the grass: a full bed mowed to nubs is (1 - nub) x the frond height, per frond */
     {
         tank_veg_set(&tank, 1, 1.0f);
         int n; float x0, x1; tank_veg_bed(&tank, 1, &x0, &x1, NULL, &n);
-        tank.trim_px = (SD_CHORE_EVERY - 40) * PX_PER_INCH; tank.sd_inches_paid = 0;
+        tank.trim_px = (SD_TRIM_CM - 100) * PX_PER_CM; tank.sd_inches_paid = 0;
         float px0 = tank.trim_px;
         for (float sx = x0 + 2; sx <= x1; sx += 4) tank_touch_drag(&tank, sx, TANK_H - 8.0f);
         SHOP_TICK(2);
         float cut = tank.trim_px - px0, expect = n * (1.0f - VEG_NUB) * (VEG_SEGS_FULL - 1) * 3.2f;
-        printf("selftest-shop: mowing bed 1 (%d fronds) cut %.0f px = %.1f in (expected ~%.0f px); the 100th inch paid %d\n", n, cut, cut / PX_PER_INCH, expect, SD_CHORE);
-        if (fabsf(cut - expect) > expect * 0.1f) { printf("FAIL: inches off (%.0f vs %.0f)\n", cut, expect); return 1; }
-        want += SD_CHORE; SHOP_WANT("100 inches");
-        if (tank.sd_inches_paid != 1) { printf("FAIL: inches paid count %d\n", tank.sd_inches_paid); return 1; }
+        printf("selftest-shop: mowing bed 1 (%d fronds) cut %.0f px = %.0f cm (expected ~%.0f px); the %dth cm paid %d\n", n, cut, cut / PX_PER_CM, expect, SD_TRIM_CM, SD_CHORE);
+        if (fabsf(cut - expect) > expect * 0.1f) { printf("FAIL: the cut is off (%.0f vs %.0f)\n", cut, expect); return 1; }
+        want += SD_CHORE; SHOP_WANT("250 cm");
+        if (tank.sd_inches_paid != 1) { printf("FAIL: grass paid count %d\n", tank.sd_inches_paid); return 1; }
     }
     /* the shop: a short balance is refused; the plant is bed 3; the snail grazes */
     {
@@ -2646,6 +2706,7 @@ int main(int argc, char **argv) {
     for (int a = 1; a < argc; a++)
         if (strcmp(argv[a], "--greedy") == 0) advisor_core_sample = false;
     for (int a = 1; a < argc; a++) {                 /* mode flags may sit anywhere */
+        if (strcmp(argv[a], "--hero") == 0 && a + 1 < argc) return hero_shot(argv[a + 1]);
         if (strcmp(argv[a], "--snapshot") == 0 && a + 1 < argc)
             return snapshot(argv[a + 1], a + 2 < argc ? atoi(argv[a + 2]) : 20);
         if (strcmp(argv[a], "--selftest") == 0) return selftest();

@@ -254,7 +254,7 @@ static void sd_tick(tank_t *t) {
     s_sd_prev_feedings = t->player_feedings;
     int32_t hund = t->algae_colonies / SD_CHORE_EVERY;
     if (hund > t->sd_colonies_paid) { sd_award(t, SD_CHORE * (hund - t->sd_colonies_paid)); t->sd_colonies_paid = hund; }
-    hund = (int32_t)(t->trim_px / PX_PER_INCH) / SD_CHORE_EVERY;
+    hund = (int32_t)(t->trim_px / (PX_PER_CM * SD_TRIM_CM));
     if (hund > t->sd_inches_paid) { sd_award(t, SD_CHORE * (hund - t->sd_inches_paid)); t->sd_inches_paid = hund; }
 }
 int progression_sell_value(int item) { return item < 0 || item >= SD_ITEM_COUNT ? 0 : SD_ITEMS[item].price * SD_SELL_PCT / 100; }
@@ -291,7 +291,7 @@ const char *const *progression_sd_earn_lines(void) {
         snprintf(lines[2], 30, "+%d  A NEW FRY IS BORN", SD_BIRTH);
         snprintf(lines[3], 30, "+%d  A FISH FULLY TRUSTS", SD_TRUST);
         snprintf(lines[4], 30, "+%d  %d ALGAE COLONIES", SD_CHORE, SD_CHORE_EVERY);
-        snprintf(lines[5], 30, "+%d  TRIMMING THE GRASS", SD_CHORE);   /* no unit: the rate is internal */
+        snprintf(lines[5], 30, "+%d  %d CM OF GRASS CUT", SD_CHORE, SD_TRIM_CM);
         for (int i = 0; i < SD_EARN_LINES; i++) ptr[i] = lines[i];
         ptr[SD_EARN_LINES] = NULL; made = true;
     }
