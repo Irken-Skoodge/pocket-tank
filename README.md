@@ -492,13 +492,23 @@ explains where every kilobyte goes. The boot log prints a per-stage frame
 profile and per-decision inference timings, so performance work is
 measurable without instruments.
 
-**Other boards.** [knoopx](https://github.com/knoopx) ported the tank to the
-Waveshare **ESP32-P4-WIFI6-Touch-LCD-4B** (4-inch 720×720 MIPI-DSI panel,
-GT911 touch, ES8311 audio) in
-[their fork](https://github.com/knoopx/pocket-tank). It is a community port:
-it needs ESP-IDF 5.5, it is not built or tested here, and it may lag behind
-this repo. [Pull request #5](https://github.com/mediacutlet/pocket-tank/pull/5)
-has the details.
+**Other boards.** This repo supports one board, to keep the project small
+while it is young. Two community ports run the tank elsewhere. They are not
+built or tested here, and they may lag behind this repo:
+
+- [knoopx](https://github.com/knoopx) ported it to the Waveshare
+  **ESP32-P4-WIFI6-Touch-LCD-4B** (4-inch 720×720 MIPI-DSI panel, GT911
+  touch, ES8311 audio) in [their fork](https://github.com/knoopx/pocket-tank).
+  It needs ESP-IDF 5.5.
+  [Pull request #5](https://github.com/mediacutlet/pocket-tank/pull/5) has
+  the details.
+- [lmoiseichuk](https://github.com/lmoiseichuk) ported it to the 2.8-inch
+  **ES3C28P "cheap yellow display"** (ESP32-S3, 320×240 ILI9341 IPS panel,
+  FT6336 touch, ES8311 audio), with every page laid out for the smaller
+  screen, in
+  [their fork](https://github.com/lmoiseichuk/pocket-tank-cyd/tree/feature/cyd_ES3C28P).
+  [Pull request #10](https://github.com/mediacutlet/pocket-tank/pull/10) has
+  the details.
 
 ## Train your own
 
