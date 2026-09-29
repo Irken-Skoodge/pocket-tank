@@ -40,6 +40,10 @@
  *   (key Z: jump through 7 h of device-style sleep; key G: grow the canopy +
  *    algae now to try the chores - press again to cycle)
  */
+#if defined(__linux__) && !defined(_DEFAULT_SOURCE)
+#define _DEFAULT_SOURCE   /* glibc hides setenv / strdup / truncate under -std=c11; an undeclared
+                             strdup returns a truncated int and --selftest-saves crashed in CI */
+#endif
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
