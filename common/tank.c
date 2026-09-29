@@ -1050,8 +1050,13 @@ void tank_tick_sleep(tank_t *t, float seconds) {
      * bit of algae from forming overnight (2026-09-04). */
     t->algae_acc += seconds;
     int steps = (int)(t->algae_acc / ALGAE_STEP_SLEEP_S);
-    if (steps > 600) steps = 600;                       /* bounded; the cap rules anyway */
     t->algae_acc -= steps * ALGAE_STEP_SLEEP_S;
+    if (steps > 600) steps = 600;                       /* bounded; the cap rules anyway. The
+                                                         * overflow is DROPPED, never banked: it
+                                                         * used to stay in algae_acc and the awake
+                                                         * tick paid it out a step per frame, film
+                                                         * refilling under the keeper's wipe after
+                                                         * a few days asleep (2026-09-29) */
     tank_grow_algae(t, steps);
 }
 
@@ -1534,7 +1539,7 @@ void tank_tick(tank_t *t, float dt, advisor_fn advise) {
     if (t->cluster_acc >= 60) { cluster_grow(t, t->cluster_acc); t->cluster_acc = 0; }
     t->algae_acc += dt;
     if (t->algae_acc >= ALGAE_STEP_AWAKE_S) {
-        t->algae_acc -= ALGAE_STEP_AWAKE_S;
+        t->algae_acc = 0;                                   /* one step per 4 min, never a backlog */
         tank_grow_algae(t, 1);
     }
     snail_tick(t, dt);

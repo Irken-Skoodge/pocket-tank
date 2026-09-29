@@ -857,6 +857,19 @@ static int selftest_tend(void) {
         printf("selftest-tend: every bed at its ceiling for an hour: stress %.1f\n", gf->stress);
         if (gf->stress < 1.5f) { printf("FAIL: a tank grown to its ceilings should smother\n"); return 1; }
     }
+    /* days asleep bank no film (2026-09-29): the sleep cap's overflow used to
+       stay in the accumulator and the awake tick paid it out a step per frame,
+       the glass refilling under the keeper's wipe */
+    {
+        tank_t away; tank_init(&away, 777); progression_boot(&away);
+        tank_tick_sleep(&away, 4 * 24 * 3600);
+        for (int i = 0; i < ALGAE_CELLS; i++) away.algae[i] = 0;          /* the keeper wipes it all */
+        for (int i = 0; i < 30 * 60; i++) tank_tick(&away, 1.0f / 60.0f, advisor_rules);
+        int back = 0;
+        for (int i = 0; i < ALGAE_CELLS; i++) back += away.algae[i] > 0;
+        printf("selftest-tend: 4 days asleep, glass wiped, 30 s awake: %d cells back\n", back);
+        if (back) { printf("FAIL: film refilled behind the wipe - a banked backlog\n"); return 1; }
+    }
     /* the device drowses in 30 s slices (firmware DROWSE_TICK_US): the same
      * night delivered that way must film the glass just as much. Before
      * 2026-09-04 every slice truncated to 0 film steps and the glass stayed
