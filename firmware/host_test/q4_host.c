@@ -8,7 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/time.h>
-static uint8_t *slurp(const char *p, size_t *n) { FILE *f = fopen(p, "rb"); if (!f) return NULL; fseek(f, 0, SEEK_END); *n = ftell(f); fseek(f, 0, SEEK_SET); uint8_t *b = malloc(*n); fread(b, 1, *n, f); fclose(f); return b; }
+static uint8_t *slurp(const char *p, size_t *n) { FILE *f = fopen(p, "rb"); if (!f) return NULL; fseek(f, 0, SEEK_END); *n = ftell(f); fseek(f, 0, SEEK_SET); uint8_t *b = malloc(*n); if (b && fread(b, 1, *n, f) != *n) { free(b); b = NULL; } fclose(f); return b; }
 static void *xalloc(size_t n) { return calloc(1, n); }
 int main(int argc, char **argv) {
     if (argc < 4) { fprintf(stderr, "usage: q4_host model_q4.bin tokenizer.bin \"prompt ->\"\n"); return 1; }
