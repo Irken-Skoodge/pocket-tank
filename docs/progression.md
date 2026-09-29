@@ -123,14 +123,16 @@ was before.
 - **Earned** (one table, `SD_*` in progression.h): a meal (a fish ate from
   a keeper feeding) 2; a fish reaching juvenile / adult / elder 5 / 10 / 25;
   a fry born 20; a fish at full trust (10.0) 15, once; every 100 algae
-  colonies removed 25; every 100 inches of grass cut 25. The chore counts
+  colonies removed 25; every 2400 px of grass cut 25. The chore counts
   repeat: they are the standing income. Detected from what the tank already
   counts, against a paid ledger in the save - nothing pays twice, and a
   tank saved before the shop is back-paid once for the stages, the trust
   and the hundreds it already had (meals are adopted, not back-paid).
 - **A colony** is a connected patch of film whose last cell went under the
-  keeper's wipe; **an inch** is 24 px of frond actually cut (the tank reads
-  as ~15 in tall). The snail's grazing counts for neither.
+  keeper's wipe; the grass counts px of frond actually cut (the code's
+  "inches", PX_PER_INCH = 24, are internal only: the screen names no unit -
+  "+25  TRIMMING THE GRASS" since 2026-09-29, after a UK keeper read "IN" as
+  the word). The snail's grazing counts for neither.
 - **The shop** opens from the sand dollar on the milestones page's TANK row.
   Items: the SWORD PLANT (40) - a fourth bed of broad leaves on the open
   floor, trimmed and grown and counted as cover like the grass - and the

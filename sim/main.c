@@ -35,6 +35,7 @@
  *   ./fishsim --selftest-hunger      headless hunger economy (untended tank never ravenous)
  *   ./fishsim --selftest-shop        headless sand dollars: awards, the shop, the plant, the snail, the save
  *   ./fishsim --selftest-battery     headless battery page: stretches, sleep, learned rates, estimates, the pill
+ *   ./fishsim --selftest-saves       headless update promise: every save in testdata/saves, whole and cut to older builds' lengths
  *   ./fishsim --bench                headless render-cost profile (veg, card)
  *   (key Z: jump through 7 h of device-style sleep; key G: grow the canopy +
  *    algae now to try the chores - press again to cycle)
@@ -211,8 +212,11 @@ static int selftest_spawn(void) {
 
 /* population + progression + persistence, headless and fast */
 static int selftest_pop(void) {
-    setenv("POCKET_TANK_SAVE", "/tmp/pocket-tank-selftest.sav", 1);   /* never touch the real save */
-    char cmd[600]; snprintf(cmd, sizeof cmd, "rm -f /tmp/pocket-tank-selftest.sav"); (void)system(cmd);
+    setenv("POCKET_TANK_SAVE", "/dev/null/pocket-tank-selftest.sav", 1);
+    tank_init(&tank, 98);
+    if (progression_save(&tank)) { printf("FAIL: an unwritable save reported success\n"); return 1; }
+    setenv("POCKET_TANK_SAVE", "/tmp/pocket-tank-selftest/nested/tank.sav", 1);   /* also checks parent creation */
+    char cmd[600]; snprintf(cmd, sizeof cmd, "rm -f /tmp/pocket-tank-selftest/nested/tank.sav"); (void)system(cmd);
     tank_init(&tank, 99);
     progression_boot(&tank);                      /* no save -> new random pair */
     print_roster(&tank);
@@ -803,6 +807,155 @@ static int selftest_sleep(void) {
     (void)system(cmd);
     return 0;
 }
+
+/* --selftest-saves (2026-09-29): the update promise - a browser update never
+ * loses the tank. Every save in testdata/saves (frozen: the board's, the
+ * sim's, one with every tail set; see the README there) loads, whole and cut
+ * to every older build's length (the 1432 cut in the first public
+ * installer's pre-bubble layout). What comes back must match the file's own
+ * bytes read at the offsets of progression.c's SAVE LAYOUT LOCK, a cut-off
+ * tail reading as the defaults - and again after a save and a reload. */
+#ifndef _MSC_VER
+#include <dirent.h>
+static const size_t SAVE_CUTS[] = { 448, 1112, 1304, 1408, 1432, 1440, 1456, 1480, 1608, 1616, 1624, 1640, 1656 };
+static uint32_t sv_u32(const uint8_t *e, size_t off) { uint32_t v; memcpy(&v, e + off, 4); return v; }
+static float    sv_f32(const uint8_t *e, size_t off) { float v; memcpy(&v, e + off, 4); return v; }
+static int name_cmp(const void *a, const void *b) { return strcmp(*(char *const *)a, *(char *const *)b); }
+
+/* the loaded tank vs e (the save's bytes in today's layout, zeros past the cut) */
+static int saves_check(const char *what, const uint8_t *e, float bubble_default) {
+    #define SV_FAIL(...) do { printf("FAIL: %s: ", what); printf(__VA_ARGS__); printf("\n"); return 1; } while (0)
+    int n = e[23];
+    if (tank.n_fish != n && !(e[22] && tank.n_fish == n + 1)) SV_FAIL("%d fish, want %d", tank.n_fish, n);
+    if (progression_setup_pending() != (e[1304] != 0)) SV_FAIL("setup pending %d", progression_setup_pending());
+    for (int i = 0; i < n; i++) {
+        const fish_t *f = &tank.fish[i]; const uint8_t *fs = e + 40 + 68 * i;
+        uint32_t ms = sv_u32(fs, 64) & ~MS_RETIRED_MASK;
+        char want[FISH_NAME_MAX + 1] = { 0 }; const char *nm = (const char *)e + 1308 + (FISH_NAME_MAX + 1) * i;
+        for (int k = 0; k < FISH_NAME_MAX && nm[k]; k++) want[k] = (char)tolower((unsigned char)nm[k]);
+        if (!want[0]) snprintf(want, sizeof want, "%s", tank_roster_name(fs[0] % tank_roster_count()));
+        if (f->preset != fs[0] % tank_roster_count()) SV_FAIL("fish %d preset %d, want %d", i, f->preset, fs[0]);
+        if (strcmp(f->name, want)) SV_FAIL("fish %d is %s, want %s", i, f->name, want);
+        if (f->trust != sv_f32(fs, 8) || progression_age_s(&tank, i) != sv_f32(fs, 44))
+            SV_FAIL("fish %d trust %.2f age %.0f s, want %.2f / %.0f", i, f->trust, progression_age_s(&tank, i), sv_f32(fs, 8), sv_f32(fs, 44));
+        if (f->eaten != (int32_t)sv_u32(fs, 56) || f->eaten_player != (int32_t)sv_u32(fs, 60)) SV_FAIL("fish %d meals %d/%d", i, f->eaten, f->eaten_player);
+        if (f->ms_bits != ms || f->ms_seen != (sv_u32(e, 1408 + 4 * i) & ms))
+            SV_FAIL("fish %d badges %03x seen %03x, want %03x / %03x", i, f->ms_bits, f->ms_seen, ms, sv_u32(e, 1408 + 4 * i) & ms);
+        if (sv_u32(e, 1356 + 4 * i) && f->color != sv_u32(e, 1356 + 4 * i)) SV_FAIL("fish %d color %06x", i, f->color);
+        int pa = e[1437 + 2 * i] - 1; if (pa >= n) pa = -1;
+        if (f->parent_a != pa) SV_FAIL("fish %d parent %d, want %d", i, f->parent_a, pa);
+    }
+    int nb = e[1436] && e[1436] <= n ? e[1436] - 1 : -1;
+    if (progression_newborn() != nb) SV_FAIL("newborn %d, want %d", progression_newborn(), nb);
+    if (tank.player_feedings != (int32_t)sv_u32(e, 28) || tank.tank_ms_bits != sv_u32(e, 36) ||
+        tank.tank_ms_seen != (sv_u32(e, 1432) & sv_u32(e, 36))) SV_FAIL("feedings %d, tank badges %03x seen %03x", tank.player_feedings, tank.tank_ms_bits, tank.tank_ms_seen);
+    if (memcmp(tank.algae, e + 460, ALGAE_CELLS) || tank.trims != (int32_t)sv_u32(e, 1104) || tank.cells_cleaned != (int32_t)sv_u32(e, 1108))
+        SV_FAIL("the glass / the chore counters differ");
+    float bx = sv_f32(e, 1404) > 0 ? sv_f32(e, 1404) : bubble_default;
+    if (tank.bubble_x != bx) SV_FAIL("bubble column %.0f, want %.0f", tank.bubble_x, bx);
+    int idle = e[1476] | e[1477] << 8;
+    if (tank.light_idle_s != (idle ? idle : LIGHT_IDLE_S) || tank.light_auto != (e[1478] != 0)) SV_FAIL("light settings %d s auto %d", tank.light_idle_s, tank.light_auto);
+    if (tank.sd_balance != (int32_t)sv_u32(e, 1480) || tank.sd_earned != (int32_t)sv_u32(e, 1484) ||
+        tank.sd_unlocks != (sv_u32(e, 1488) & ((1u << SD_ITEM_COUNT) - 1))) SV_FAIL("sand dollars %d (earned %d), unlocks %02x", tank.sd_balance, tank.sd_earned, tank.sd_unlocks);
+    if (tank.snail_grazed != (int32_t)sv_u32(e, 1612)) SV_FAIL("the snail's tally %d", (int)tank.snail_grazed);
+    if (sv_f32(e, 1616) > 0 && (tank.castle_x != sv_f32(e, 1616) || tank.castle_z != (e[1620] == DECOR_Z_BACK + 1 ? DECOR_Z_BACK : DECOR_Z_FRONT)))
+        SV_FAIL("castle at %.0f depth %d", tank.castle_x, tank.castle_z);
+    if (sv_u32(e, 1632) && tank.coral_rgb != (sv_u32(e, 1632) & 0xffffff)) SV_FAIL("coral color %06x", tank.coral_rgb);
+    if (tank.coral_growth != fmaxf(sv_f32(e, 1636), 0) || tank.cluster_growth != fmaxf(sv_f32(e, 1648), 0)) SV_FAIL("coral / cluster growth %.2f / %.2f", tank.coral_growth, tank.cluster_growth);
+    if (tank.cluster_scheme != (e[1645] < CLUSTER_SCHEME_N ? e[1645] : CLUSTER_SCHEME_N - 1)) SV_FAIL("cluster look %d", tank.cluster_scheme);
+    return 0;
+    #undef SV_FAIL
+}
+
+/* write len bytes as the save, boot it, check it; then save, reload, check again */
+static int saves_load(const char *what, const uint8_t *bytes, size_t len, const uint8_t *e) {
+    const char *sav = getenv("POCKET_TANK_SAVE");
+    FILE *f = fopen(sav, "wb"); if (!f || fwrite(bytes, 1, len, f) != len) { printf("FAIL: could not write %s\n", sav); return 1; }
+    fclose(f);
+    tank_init(&tank, 8); float bx0 = tank.bubble_x;
+    progression_wake(&tank, 0);                          /* no clock: a plain restore, nothing lived through */
+    if (saves_check(what, e, bx0)) return 1;
+    progression_save(&tank);
+    tank_init(&tank, 9); progression_wake(&tank, 0);
+    char again[300]; snprintf(again, sizeof again, "%s, saved and reloaded", what);
+    return saves_check(again, e, bx0);
+}
+
+static int selftest_saves(void) {
+    setenv("POCKET_TANK_SAVE", "/tmp/pocket-tank-selftest-saves.sav", 1);   /* never touch the real save */
+    if (strcmp(SAVE_NVS_NS, "tank") || strcmp(SAVE_NVS_KEY, "save")) {
+        printf("FAIL: the device's save moved to %s/%s - every keeper's tank stays behind in tank/save\n", SAVE_NVS_NS, SAVE_NVS_KEY); return 1; }
+    const char *dir = "testdata/saves";
+    DIR *d = opendir(dir); if (!d) d = opendir(dir = "sim/testdata/saves");
+    if (!d) { printf("FAIL: no testdata/saves (run from sim/ or the repo root)\n"); return 1; }
+    char *names[64]; int nf = 0; struct dirent *de;
+    while ((de = readdir(d)) && nf < 64) { size_t l = strlen(de->d_name); if (l > 4 && !strcmp(de->d_name + l - 4, ".sav")) names[nf++] = strdup(de->d_name); }
+    closedir(d);
+    qsort(names, nf, sizeof *names, name_cmp);
+    if (nf == 0) { printf("FAIL: %s holds no .sav fixtures\n", dir); return 1; }
+    int loads = 0;
+    static uint8_t file[4096], cur[4096], e[4096], cut[4096];
+    for (int k = 0; k < nf; k++) {
+        char path[600]; snprintf(path, sizeof path, "%s/%s", dir, names[k]);
+        FILE *f = fopen(path, "rb"); if (!f) { printf("FAIL: %s\n", path); return 1; }
+        size_t len = fread(file, 1, sizeof file, f); fclose(f);
+        if (len < 448 || sv_u32(file, 0) != 0x50544b32u) { printf("FAIL: %s is not a PTK2 save (%zu bytes)\n", names[k], len); return 1; }
+        /* today's layout: a 1432-byte save is the pre-bubble one - bubble_x (4 zero bytes) goes back in at 1404 */
+        memset(cur, 0, sizeof cur); size_t curlen = len;
+        if (len == 1432) { memcpy(cur, file, 1404); memcpy(cur + 1408, file + 1404, 28); curlen = 1436; }
+        else memcpy(cur, file, len);
+        size_t ats[16]; int na = 0; bool whole = false;      /* every older length it holds, then the file as it is */
+        for (size_t c = 0; c < sizeof SAVE_CUTS / sizeof *SAVE_CUTS; c++)
+            if (SAVE_CUTS[c] <= curlen) { ats[na++] = SAVE_CUTS[c]; whole |= SAVE_CUTS[c] == len; }
+        if (!whole) ats[na++] = len;
+        char cuts[400] = ""; size_t cl = 0;
+        for (int c = 0; c < na; c++) {
+            size_t at = ats[c];
+            memset(e, 0, sizeof e);
+            if (at == 1432) {                                    /* the first public installer's layout */
+                memcpy(e, cur, 1436); memset(e + 1404, 0, 4);
+                memcpy(cut, cur, 1404); memcpy(cut + 1404, cur + 1408, 28);
+            } else { memcpy(e, cur, at); memcpy(cut, cur, at); }
+            char what[300]; snprintf(what, sizeof what, "%s cut to %zu bytes", names[k], at);
+            if (saves_load(what, cut, at, e)) return 1;
+            loads++;
+            cl += snprintf(cuts + cl, sizeof cuts - cl, "%s%zu", cl ? " " : "", at);
+        }
+        char who[120] = ""; size_t wl = 0;
+        for (int i = 0; i < tank.n_fish && wl < sizeof who - 12; i++) wl += snprintf(who + wl, sizeof who - wl, "%s%s", i ? " " : "", tank.fish[i].name);
+        printf("selftest-saves: %s: %d fish (%s), %d sand dollars - loads at %s, and again after a save\n",
+               names[k], tank.n_fish, who, (int)tank.sd_balance, cuts);
+    }
+    /* a rollback: a NEWER build's save (today's layout + 200 bytes of tail
+     * this build never heard of) loads its head, and the next save writes
+     * today's length. Before 2026-09-29 it started a fresh tank over it. */
+    {
+        memset(e, 0, sizeof e); memcpy(e, cur, sizeof(file) < 1656 ? sizeof(file) : 1656);
+        memcpy(cut, cur, 1656); memset(cut + 1656, 0xa5, 200);
+        if (saves_load("a newer build's 1856-byte save (a rollback)", cut, 1856, e)) return 1;
+        FILE *f = fopen(getenv("POCKET_TANK_SAVE"), "rb"); fseek(f, 0, SEEK_END); long l = ftell(f); fclose(f);
+        if (l != 1656) { printf("FAIL: after a rollback the save is %ld bytes, want 1656\n", l); return 1; }
+        loads++;
+        printf("selftest-saves: a rollback: a newer build's 1856-byte save loads its first 1656 and saves back at 1656\n");
+    }
+    /* not ours: shorter than the smallest PTK2, or another magic -> a fresh tank (setup owed) */
+    {
+        FILE *f = fopen(getenv("POCKET_TANK_SAVE"), "wb"); fwrite(cur, 1, 447, f); fclose(f);
+        tank_init(&tank, 8); progression_wake(&tank, 0);
+        if (!progression_setup_pending() || tank.n_fish != 2) { printf("FAIL: a 447-byte save loaded\n"); return 1; }
+        memcpy(cut, cur, 1656); cut[0] ^= 1;
+        f = fopen(getenv("POCKET_TANK_SAVE"), "wb"); fwrite(cut, 1, 1656, f); fclose(f);
+        tank_init(&tank, 8); progression_wake(&tank, 0);
+        if (!progression_setup_pending() || tank.n_fish != 2) { printf("FAIL: a save with another magic loaded\n"); return 1; }
+    }
+    remove(getenv("POCKET_TANK_SAVE"));
+    for (int k = 0; k < nf; k++) free(names[k]);
+    printf("selftest-saves ok (%d fixtures, %d loads; a 447-byte save and a foreign magic start fresh; NVS %s/%s)\n", nf, loads, SAVE_NVS_NS, SAVE_NVS_KEY);
+    return 0;
+}
+#else
+static int selftest_saves(void) { printf("selftest-saves: not in the MSVC build (no dirent; its save layout asserts are off)\n"); return 1; }
+#endif
 
 /* upkeep chores + the settled-hold gate, headless: sleep grows the canopy
  * and algae; taps trim a bed to nubs (never bare); a drag wipes the glass;
@@ -2496,6 +2649,7 @@ int main(int argc, char **argv) {
         if (strcmp(argv[a], "--selftest-hunger") == 0) return selftest_hunger();
         if (strcmp(argv[a], "--selftest-shop") == 0) return selftest_shop();
         if (strcmp(argv[a], "--selftest-battery") == 0) return selftest_battery();
+        if (strcmp(argv[a], "--selftest-saves") == 0) return selftest_saves();
         if (strcmp(argv[a], "--selftest-pop") == 0) return selftest_pop();
         if (strcmp(argv[a], "--selftest-sleep") == 0) return selftest_sleep();
         if (strcmp(argv[a], "--selftest-tend") == 0) return selftest_tend();

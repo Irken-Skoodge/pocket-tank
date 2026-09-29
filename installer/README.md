@@ -49,7 +49,29 @@ it the dialog erases the chip first, unconditionally. So:
 The firmware side of the promise: `common/progression.c` loads a save of any
 older length (the tail only ever appends) and slides the one mid-struct
 insertion (bubble_x, 2026-09-14) into place for saves from the first public
-builds; `sim/fishsim --selftest-sleep` covers both.
+builds; since 2026-09-29 it also loads the head of a NEWER build's longer
+save, so rolling back to an older release keeps the tank (the newer-only
+tail reads as its defaults when the newer build returns). What guards it:
+
+- **SAVE LAYOUT LOCK** (progression.c): a compile-time assert on every
+  save_t / fish_save_t offset, the magic, the NVS names, and the NVS size
+  budget (4000 B, math in the comment). A field inserted mid-struct, a
+  rename of `tank`/`save`, or a save too big for the partition fails the
+  build, on the device and in the sim.
+- **`sim/fishsim --selftest-saves`**: every save in `sim/testdata/saves/`
+  (the board's, the sim's, one with every tail set) loads whole and cut to
+  every older build's length, checked field by field against the file's
+  own bytes, then again after a save; plus a newer build's longer save (the
+  rollback). Add a save from each release there (its README says how).
+- **`check_nvs_untouched`** (make_installer.py): the installer build fails
+  if the partition table it ships moves or resizes nvs, or if any part it
+  writes overlaps 0x9000..0xF000.
+- **Boot never erases on a guess** (main.c `nvs_start`): only an NVS that
+  can't mount at all ("no free pages") is erased, and a raw copy goes to the
+  front of the unused `storage` partition first (`esptool read_flash
+  0xA90000 0x6000`); any other init error runs the tank without saving and
+  leaves the flash alone. A save that exists but won't read turns saving
+  off until a reset, so it is never overwritten by a fresh tank.
 
 ## It updates itself (GitHub Pages)
 

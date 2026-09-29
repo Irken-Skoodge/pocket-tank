@@ -6,6 +6,7 @@
  * every decision + tok/s goes to the log. */
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
@@ -33,7 +34,6 @@
 #include "audio.h"
 #include "notice.h"
 #include "tank_events.h"
-#include "setup.h"
 #include "setup.h"
 #include "nvs_flash.h"
 #include "esp_app_desc.h"
@@ -175,7 +175,9 @@ static void enter_sleep_for(int wake_after_s) {
              (int)(grace_us / 1000000),
              wake_after_s > 0 ? "deep sleep with the timer" : s_pmic ? "PMIC power-off (the PWR key boots it)" : "deep sleep (BOOT wakes)", pct0, mv0);
     touch_port_confirm_answer(-1);              /* an open reset prompt is a NO */
-    progression_save(&tank);
+    if (!progression_save(&tank))               /* never cancels: a tank that can't save (NVS down, a save that
+                                                   wouldn't load) must still sleep, or the key goes dead */
+        ESP_LOGE(TAG, "sleep: the tank save failed - sleeping anyway, the last good save stands");
     bat_hist_save();                            /* the screen-on time so far */
     snapshot_fish();
     audio_port_sleep();        /* amp low, codec down, rail off - before the rails cycle */
@@ -254,7 +256,8 @@ void device_sleep(int wake_after_s) { enter_sleep_for(wake_after_s); }   /* dire
 static void enter_poweroff(void) {
     ESP_LOGI(TAG, "power-off now: saving tank, PMIC soft cut (the PWR key boots)");
     touch_port_confirm_answer(-1);
-    progression_save(&tank);
+    if (!progression_save(&tank))               /* never cancels (see enter_sleep_for) */
+        ESP_LOGE(TAG, "power-off: the tank save failed - cutting anyway, the last good save stands");
     bat_hist_save();
     audio_port_sleep();
     batlog_add(battery_pct(), battery_port_vbat_mv(), display_port_brightness(), true, "off");   /* to NVS too: the shelf time is measurable at the next boot */
@@ -581,6 +584,38 @@ static void tank_task(void *arg) {
    the installer page shows for what it would write */
 const char *version_port_string(void) { return esp_app_get_description()->version; }
 
+/* NVS holds the keeper's tank, so it is never erased on a guess. Only "no
+ * free pages" (a partition that can't mount at all) is answered with an
+ * erase, and a raw copy of the partition goes to the unused front of
+ * "storage" first, so the tank can still be pulled out by hand
+ * (esptool read_flash 0xA90000 0x6000 rescue.bin). Any other error - a
+ * newer IDF's format after a rollback, say - leaves the flash alone: the tank
+ * runs without saving until a build that can read it is back. */
+#define NVS_RESCUE_SIZE 0x6000
+static void nvs_start(void) {
+    esp_err_t e = nvs_flash_init();
+    if (e == ESP_OK) return;
+    if (e != ESP_ERR_NVS_NO_FREE_PAGES) {
+        ESP_LOGE(TAG, "NVS init: %s - running WITHOUT saving; the saved tank is left as it is", esp_err_to_name(e));
+        return;
+    }
+    const esp_partition_t *nvs = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_NVS, NULL);
+    const esp_partition_t *st  = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, "storage");
+    uint8_t *raw = nvs && nvs->size <= NVS_RESCUE_SIZE ? heap_caps_malloc(nvs->size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) : NULL;
+    bool kept = raw && st && st->size >= NVS_RESCUE_SIZE
+             && esp_partition_read(nvs, 0, raw, nvs->size) == ESP_OK
+             && esp_partition_erase_range(st, 0, NVS_RESCUE_SIZE) == ESP_OK
+             && esp_partition_write(st, 0, raw, nvs->size) == ESP_OK;
+    free(raw);
+    if (!kept) {
+        ESP_LOGE(TAG, "NVS init: no free pages and no rescue copy - running WITHOUT saving, nothing erased");
+        return;
+    }
+    ESP_LOGE(TAG, "NVS init: no free pages - raw copy at storage+0 (0x%lx), erasing NVS", (unsigned long)st->address);
+    nvs_flash_erase();
+    nvs_flash_init();
+}
+
 void app_main(void) {
     ESP_LOGI(TAG, "pocket-tank boot%s",
              esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT0 ? " (woken by button)" : "");
@@ -588,7 +623,7 @@ void app_main(void) {
                           .pull_up_en = GPIO_PULLUP_ENABLE };
     gpio_config(&btn);
     gpio_deep_sleep_hold_dis();              /* a deep-sleep wake is a boot: the night's pad holds end here */
-    if (nvs_flash_init() != ESP_OK) { nvs_flash_erase(); nvs_flash_init(); }
+    nvs_start();
     { int carried = batlog_init();       /* the battery log survives every reset but a power-on */
       if (carried) ESP_LOGI(TAG, "batlog: %d samples carried through the reset (director `batlog` reads them)", carried); }
     brightness_init();

@@ -195,7 +195,7 @@ done, the parents court in the grass and the fry is born within the minute.
 them on things for the tank. A meal the fish eat from your hand pays 2; a
 fish growing up pays 5, 10 and 25 for juvenile, adult and elder; a fry
 born 20; a fish that comes to trust you completely 15; every hundred algae
-colonies you wipe away and every hundred inches of grass you cut pay 25,
+colonies you wipe away pay 25, and so does keeping the grass trimmed,
 again and again. Nothing is ever needed and nothing is lost: a tank with no
 sand dollars is exactly the tank there was before. The coin on the
 milestones page's TANK row shows your balance, and it (or the UPGRADES
@@ -391,8 +391,9 @@ brew install sdl2        # macOS; apt install libsdl2-dev on Linux
 cd sim && make && ./fishsim
 ```
 
-The Makefile targets x86_64 by default to match an Intel Homebrew SDL2; use
-`make ARCH=` for a native build. The trained model
+On macOS the Makefile targets x86_64 by default to match an Intel Homebrew
+SDL2; use `make ARCH=` for a native build. On Linux it builds for the host.
+The trained model
 (`model/out/model_q4.bin` + `tokenizer.bin`) ships in the repo, so the LLM
 brain works out of the box.
 
@@ -426,6 +427,7 @@ the deep-sleep wake, and ravenous begging), `--selftest-hunger` (the hunger econ
 `--selftest-tend` (grass, algae, trust holds), `--selftest-shop` (sand
 dollars, the shop, the plant, the snail), `--selftest-battery` (the battery
 page's numbers, and the bolt only on the cable), and `--bench` (render cost).
+`make check` from `sim/` runs every selftest.
 
 ## Try it: firmware in QEMU
 

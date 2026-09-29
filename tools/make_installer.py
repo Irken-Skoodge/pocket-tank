@@ -29,7 +29,7 @@ layout change can't silently ship a stale offset.
 
 Web Serial needs a secure context: serve the folder over HTTPS (or from
 http://localhost for a local check: `python3 -m http.server -d installer/dist`)."""
-import argparse, datetime, hashlib, json, os, shutil, subprocess, sys
+import argparse, datetime, hashlib, json, os, shutil, struct, subprocess, sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_BUILD = os.path.expanduser("~/.cache/pocket-tank/fw-build")
@@ -73,6 +73,37 @@ def model_offset():
     sys.exit("partitions.csv: no 'model' partition")
 
 
+# The tank's save lives in NVS (firmware/partitions.csv: nvs at 0x9000, 0x6000
+# long), and "updating never erases" holds only while it stays there: the
+# page writes the partition table too, so a moved or resized nvs row would
+# boot the update on blank NVS (the tank gone), and a part that grew into
+# 0x9000..0xF000 would overwrite it. So the build fails on either, reading the
+# partition table the page actually ships.
+NVS_OFFSET, NVS_SIZE = 0x9000, 0x6000
+
+
+def check_nvs_untouched(parts, ptable):
+    rows = {}
+    raw = open(ptable, "rb").read()
+    for i in range(0, len(raw) - 31, 32):
+        magic, ptype, sub, off, size = struct.unpack_from("<HBBII", raw, i)
+        if magic != 0x50AA:                  # 0xEBEB = the md5 row, 0xFFFF = the end
+            break
+        rows[raw[i + 12:i + 28].split(b"\0")[0].decode()] = (ptype, sub, off, size)
+    nvs = [(label, r) for label, r in rows.items() if r[:2] == (1, 2)]   # data, nvs
+    if len(nvs) != 1 or nvs[0][1][2:] != (NVS_OFFSET, NVS_SIZE):
+        sys.exit(f"{ptable}: the nvs row must stay at 0x{NVS_OFFSET:x}, 0x{NVS_SIZE:x} long - found "
+                 + (", ".join(f"{l} 0x{r[2]:x} 0x{r[3]:x}" for l, r in nvs) or "none")
+                 + "; every keeper's tank lives there and an update would leave it behind")
+    for off, src, pub in parts:
+        end = off + os.path.getsize(src)
+        if off < NVS_OFFSET + NVS_SIZE and end > NVS_OFFSET:
+            sys.exit(f"{pub}: 0x{off:x}..0x{end:x} overlaps nvs 0x{NVS_OFFSET:x}..0x{NVS_OFFSET + NVS_SIZE:x} "
+                     "- installing it would overwrite the keeper's tank")
+    if "model" not in rows or rows["model"][2] != model_offset():
+        sys.exit(f"{ptable}: its model row disagrees with firmware/partitions.csv - rebuild the firmware")
+
+
 def git_version():
     try:
         out = subprocess.run(["git", "-C", ROOT, "describe", "--tags", "--always", "--dirty"],
@@ -109,6 +140,7 @@ def main():
     for off, src, pub in parts:
         if not os.path.isfile(src):
             sys.exit(f"missing: {src}")
+    check_nvs_untouched(parts, os.path.join(a.build_dir, fa["partition-table"]["file"]))
 
     version = a.version or git_version()
     date = datetime.date.today().isoformat()

@@ -29,8 +29,15 @@
 #include <stddef.h>
 
 /* ---- platform ports (sim: file + time(); device: NVS + RTC) ---- */
+/* where the device keeps the tank: NVS namespace + blob key. Part of the
+ * SAVE LAYOUT LOCK (progression.c): every keeper's tank is stored under
+ * these two names, so renaming either loses it at the next update.
+ * --selftest-saves pins the spelling. */
+#define SAVE_NVS_NS  "tank"
+#define SAVE_NVS_KEY "save"
 bool    persist_port_load(void *buf, size_t max, size_t *got); /* the saved blob, whatever length an older
-                                                            * build wrote (<= max; *got = it); false = nothing saved */
+                                                            * build wrote (*got = it); a NEWER build's longer one
+                                                            * loads its first max bytes (*got = max); false = nothing */
 bool    persist_port_save(const void *buf, size_t len);
 bool    persist_port_erase(void);                          /* EVERY saved tank, parked copies included */
 int64_t clock_port_now_unix(void);                         /* 0 if unknown */
@@ -67,7 +74,9 @@ void progression_settings_changed(void);
 /* call every frame after tank_tick */
 void progression_tick(tank_t *t, float dt);
 /* call on light-off / shutdown (autosaves on events + heartbeat anyway) */
-void progression_save(tank_t *t);
+/* Save the current tank. False means the port rejected the write; the state
+ * remains dirty so the periodic saver will retry. */
+bool progression_save(tank_t *t);
 
 /* sim/debug: multiply time (aging, drift) - `./fishsim --fast 60` */
 extern float progression_time_scale;

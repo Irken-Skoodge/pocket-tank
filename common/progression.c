@@ -128,6 +128,68 @@ _Static_assert(offsetof(save_t, ms_seen) == offsetof(save_t, bubble_x) + sizeof(
 _Static_assert(offsetof(save_t, bubble_x) + sizeof(((save_t *)0)->ms_seen) + sizeof(uint32_t) == SAVE_PRE_BUBBLE_SIZE,
                "the pre-bubble migration expects the 1432-byte layout's masks to end at 1432");
 
+/* ---- SAVE LAYOUT LOCK (2026-09-29): a new field goes at the END of save_t
+ * with its own assert here; never edit an existing line here. ----
+ * Every tank on a keeper's board is read back through these offsets after a
+ * browser update, so they are frozen: a failing assert means the change just
+ * moved (scrambled) every saved tank - put the field at the end instead. The
+ * array bounds are in here too (N_FISH_MAX, VEG_BEDS, VEG_FRONDS_MAX,
+ * ALGAE_CELLS, FISH_NAME_MAX): growing one shifts everything after it, so a
+ * bigger bound needs a new tail, not a bigger array. The numbers hold on both
+ * builds: no pointers or longs, int64_t aligns to 8 and bool is 1 byte on the
+ * device's xtensa gcc and on the 64-bit sim alike (both compilers measured
+ * the same 1656 bytes, 2026-09-29). The sizes older builds wrote, all still
+ * loadable: 448, 1112, 1304, 1408, 1432 (pre-bubble), 1440, 1456, 1480, 1608,
+ * 1616, 1624, 1640, 1656 - sim/testdata/saves holds them. */
+_Static_assert(SAVE_MAGIC == 0x50544b32u, "SAVE LAYOUT LOCK: a new magic = every saved tank starts fresh");
+_Static_assert(sizeof SAVE_NVS_NS == 5 && sizeof SAVE_NVS_KEY == 5, "SAVE LAYOUT LOCK: the NVS namespace / key are \"tank\" / \"save\"");
+#define SAVE_AT(f, off) _Static_assert(offsetof(save_t, f) == (off), "SAVE LAYOUT LOCK: save_t." #f " moved")
+#define FISH_AT(f, off) _Static_assert(offsetof(fish_save_t, f) == (off), "SAVE LAYOUT LOCK: fish_save_t." #f " moved")
+FISH_AT(preset, 0); FISH_AT(stage, 1); FISH_AT(pad, 2); FISH_AT(size, 4); FISH_AT(trust, 8);
+FISH_AT(bold, 12); FISH_AT(sociable, 16); FISH_AT(bold0, 20); FISH_AT(sociable0, 24);
+FISH_AT(hunger, 28); FISH_AT(energy, 32); FISH_AT(stress, 36); FISH_AT(curiosity, 40);
+FISH_AT(age_s, 44); FISH_AT(rest_dx, 48); FISH_AT(rest_dy, 52);
+FISH_AT(eaten, 56); FISH_AT(eaten_player, 60); FISH_AT(ms_bits, 64);
+_Static_assert(sizeof(fish_save_t) == 68, "SAVE LAYOUT LOCK: fish_save_t is frozen (a new per-fish field = a new save_t tail array)");
+SAVE_AT(magic, 0); SAVE_AT(saved_unix, 8); SAVE_AT(clock, 16);
+SAVE_AT(light_override, 20); SAVE_AT(light_on, 21); SAVE_AT(arrival_pending, 22); SAVE_AT(n_fish, 23);
+SAVE_AT(feed_spot_x, 24); SAVE_AT(player_feedings, 28); SAVE_AT(hold_approaches, 32); SAVE_AT(tank_ms_bits, 36);
+SAVE_AT(fish, 40);                                             /* 6 x 68 */
+SAVE_AT(veg_growth, 448); SAVE_AT(algae, 460); SAVE_AT(trims, 1104); SAVE_AT(cells_cleaned, 1108);   /* upkeep, 08-30 */
+SAVE_AT(veg_h, 1112);                                          /* fronds, 09-04 */
+SAVE_AT(setup_pending, 1304); SAVE_AT(pad_id, 1305); SAVE_AT(names, 1308);                            /* identity, 09-13 */
+SAVE_AT(body, 1356); SAVE_AT(accent, 1380); SAVE_AT(bubble_x, 1404);
+SAVE_AT(ms_seen, 1408); SAVE_AT(tank_ms_seen, 1432);           /* seen masks, 09-13 */
+SAVE_AT(newborn_p1, 1436); SAVE_AT(parent_p1, 1437); SAVE_AT(pad_fam, 1449);                          /* family, 09-14 */
+SAVE_AT(drift_acc, 1452);                                      /* drift, 09-15 */
+SAVE_AT(light_idle_s, 1476); SAVE_AT(light_auto, 1478); SAVE_AT(light_manual_off, 1479);              /* light, 09-15 */
+SAVE_AT(sd_balance, 1480); SAVE_AT(sd_earned, 1484); SAVE_AT(sd_unlocks, 1488); SAVE_AT(sd_paid_fish, 1492);   /* shop, 09-15 */
+SAVE_AT(sd_colonies_paid, 1516); SAVE_AT(sd_inches_paid, 1520); SAVE_AT(algae_colonies, 1524);
+SAVE_AT(trim_px, 1528); SAVE_AT(snail_x, 1532); SAVE_AT(snail_y, 1536); SAVE_AT(veg_h3, 1540);
+SAVE_AT(plant_x, 1604); SAVE_AT(plant_z1, 1608); SAVE_AT(pad_place, 1609);                            /* placement, 09-16 */
+SAVE_AT(snail_grazed, 1612);
+SAVE_AT(castle_x, 1616); SAVE_AT(castle_z1, 1620); SAVE_AT(pad_castle, 1621);                         /* castle, 09-16 */
+SAVE_AT(coral_x, 1624); SAVE_AT(coral_z1, 1628); SAVE_AT(pad_coral, 1629); SAVE_AT(coral_rgb, 1632);  /* coral, 09-23 */
+SAVE_AT(coral_growth, 1636);
+SAVE_AT(cluster_x, 1640); SAVE_AT(cluster_z1, 1644); SAVE_AT(cluster_scheme, 1645);                   /* reef cluster, 09-24 */
+SAVE_AT(pad_cluster, 1646); SAVE_AT(cluster_growth, 1648);
+/* (the next field: SAVE_AT(its_name, 1652 or its type's alignment past it);) */
+_Static_assert(sizeof(save_t) >= 1656, "SAVE LAYOUT LOCK: save_t only ever grows");
+/* NVS budget: the save is one blob in the nvs partition (0x9000, 0x6000 =
+ * 6 pages of 4096 B; tools/make_installer.py pins the row). A page is 126
+ * entries of 32 B, and NVS keeps one page free for its garbage collection:
+ * 5 x 126 = 630 entries usable. A blob costs an entry per 32 B, a header per
+ * chunk (a chunk stays on one page) and an index entry, and nvs_set_blob
+ * writes the new copy before it erases the old - on top of the director's
+ * parked "bk" copy, three at once at worst. At 4000 B (a page's worth) that
+ * is 3 x ~128 = ~390 entries, plus ~10 for the settings, "bat"/"hist" and
+ * the batlog's "bed": under 2/3 of the 630, so GC always has room. Past it,
+ * saves can start failing for space, and any nvs_flash_init error makes
+ * main.c ERASE the partition. 1656 B today (54 entries a copy): 2344 B of
+ * headroom. */
+#define SAVE_NVS_BUDGET 4000
+_Static_assert(sizeof(save_t) <= SAVE_NVS_BUDGET, "the save outgrew its NVS budget - see the math above");
+
 float progression_time_scale = 1.0f;
 
 static float s_age[N_FISH_MAX];      /* seconds of tended life per fish */
@@ -229,7 +291,7 @@ const char *const *progression_sd_earn_lines(void) {
         snprintf(lines[2], 30, "+%d  A NEW FRY IS BORN", SD_BIRTH);
         snprintf(lines[3], 30, "+%d  A FISH FULLY TRUSTS", SD_TRUST);
         snprintf(lines[4], 30, "+%d  %d ALGAE COLONIES", SD_CHORE, SD_CHORE_EVERY);
-        snprintf(lines[5], 30, "+%d  %d IN OF GRASS CUT", SD_CHORE, SD_CHORE_EVERY);
+        snprintf(lines[5], 30, "+%d  TRIMMING THE GRASS", SD_CHORE);   /* no unit: the rate is internal */
         for (int i = 0; i < SD_EARN_LINES; i++) ptr[i] = lines[i];
         ptr[SD_EARN_LINES] = NULL; made = true;
     }
@@ -740,7 +802,7 @@ void progression_tick(tank_t *t, float dt) {
         progression_save(t);
 }
 
-void progression_save(tank_t *t) {
+bool progression_save(tank_t *t) {
     save_t sv; memset(&sv, 0, sizeof sv);
     sv.magic = SAVE_MAGIC; sv.saved_unix = clock_port_now_unix(); sv.clock = t->clock;
     /* light_override / light_on stay zero in the save (2026-09-15) */
@@ -785,8 +847,13 @@ void progression_save(tank_t *t) {
         sv.ms_seen[i] = f->ms_seen;
         sv.drift_acc[i] = f->drift_acc;
     }
-    persist_port_save(&sv, sizeof sv);
+    if (!persist_port_save(&sv, sizeof sv)) {
+        if (!s_dirty) { s_dirty = true; s_dirty_since = 0; }
+        s_since_save = 0;                         /* retry after SAVE_MIN_GAP_S */
+        return false;
+    }
     s_since_save = 0; s_dirty = false; s_dirty_since = 0;
+    return true;
 }
 
 void progression_ack_milestones(tank_t *t) {
