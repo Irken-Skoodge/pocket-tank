@@ -41,6 +41,9 @@ bool    persist_port_load(void *buf, size_t max, size_t *got); /* the saved blob
 bool    persist_port_save(const void *buf, size_t len);
 bool    persist_port_erase(void);                          /* EVERY saved tank, parked copies included */
 int64_t clock_port_now_unix(void);                         /* 0 if unknown */
+/* the release (version.h PT_RELEASE_NUM) of the build that wrote the save
+ * the last load read - 0 for a save from before release numbers, or none */
+uint32_t progression_loaded_release(void);
 const char *version_port_string(void);                     /* the build's git describe (device: the app
                                                             * descriptor; sim: PT_VERSION) - the settings page */
 
@@ -191,6 +194,7 @@ const char *const *progression_fry_tip(int kind);
 #define SD_PRICE_CASTLE 150
 #define SD_PRICE_CORAL 100
 #define SD_PRICE_CLUSTER 240
+#define SD_PRICE_SHRIMP 180       /* 2026-09-29, Strato (first 300, then 180) */
 typedef struct {
     uint32_t    bit;               /* SD_ITEM_* */
     const char *name;              /* <= 12 chars, the pixel font */
