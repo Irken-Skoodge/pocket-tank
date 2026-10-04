@@ -5,6 +5,7 @@
  * way for 3 consecutive polls, and holds its last state while the device lies
  * flat (no axis dominant), so the screen never flaps on a table. */
 #include "imu_port.h"
+#include "display_port.h"      /* board_is_round */
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -13,8 +14,10 @@
 /* which accel axis is "up" when the tank is held right side up. The boot log
  * prints the live vector ("imu: g=[x y z]") — if the flip is wrong or dead,
  * hold the device upright, read which axis carries ~1 g, and fix these two. */
-#define IMU_UP_AXIS 1        /* 0=X 1=Y 2=Z; calibrated 2026-08-28: upright-in-hand = -Y ~16k */
-#define IMU_UP_SIGN (-1)
+static int s_up_axis = 1;    /* 0=X 1=Y 2=Z; the 1.8, calibrated 2026-08-28: upright-in-hand = -Y ~16k */
+static int s_up_sign = -1;   /* the round 1.75C, 2026-10-01 (Strato holding it upright, USB down): +X ~16.8k (imu_port_init) */
+#define IMU_UP_AXIS s_up_axis
+#define IMU_UP_SIGN s_up_sign
 
 #define QMI8658_ADDR       0x6B
 #define QMI8658_ADDR_ALT   0x6A
@@ -61,7 +64,15 @@ static bool rdn(uint8_t reg, uint8_t *val, size_t n) {
  * was found latched with two axes railed at full scale (garbage that only a
  * reset clears; only a full PMIC power-off ever power-cycles it). Never
  * trust its power-on state. */
+static bool imu_reset_config_once(void);
 static bool imu_reset_config(void) {
+    if (imu_reset_config_once()) return true;
+    vTaskDelay(pdMS_TO_TICKS(50));             /* a chip woken from imu_port_power_down can NACK the first round */
+    return imu_reset_config_once();
+}
+static bool imu_reset_config_once(void) {
+    (void)wr8(REG_CTRL1, 0x40);                /* its 2 MHz clock back on first (a night in Power-Down leaves it off) */
+    vTaskDelay(pdMS_TO_TICKS(5));
     bool rst = wr8(REG_RESET, 0xB0);
     vTaskDelay(pdMS_TO_TICKS(25));
     bool ok = wr8(REG_CTRL1, 0x40)   /* address auto-increment for burst reads */
@@ -90,6 +101,11 @@ bool imu_port_init(i2c_master_bus_handle_t bus) {
         s_dev = NULL; return false;
     }
     if (!imu_reset_config()) { ESP_LOGW(TAG, "QMI8658 config failed"); s_dev = NULL; return false; }
+    if (board_is_round()) { s_up_axis = 0; s_up_sign = 1; }
+    /* the watch, 2026-10-02 (propped on the desk, the tank right side up): g = [13100 900 -9400] -
+       the panel's long axis is X, its foot +X. Nothing reads it: on a wrist the live flip never
+       runs (main.c), the way up is settings SCREEN (tank.h) */
+    else if (board_is_watch()) { s_up_axis = 0; s_up_sign = 1; }
     ESP_LOGI(TAG, "QMI8658 up at 0x%02x: orientation axis %c%s", addr,
              IMU_UP_SIGN > 0 ? '+' : '-', IMU_UP_AXIS == 0 ? "X" : IMU_UP_AXIS == 1 ? "Y" : "Z");
     return true;
@@ -168,6 +184,11 @@ int  imu_port_motion(void) { return s_motion; }
  * dark - full soft reset + reconfigure. */
 void imu_port_sleep(void) {
     if (s_dev) (void)wr8(REG_CTRL7, 0x00);
+}
+/* the datasheet's Power-Down: CTRL1 sensorDisable (bit 0) with every sensor
+ * off; the boot's soft reset undoes it */
+void imu_port_power_down(void) {
+    if (s_dev) (void)wr8(REG_CTRL1, 0x41);
 }
 void imu_port_wake(void) {
     if (!s_dev) return;

@@ -15,7 +15,7 @@
  *
  * PLACE THE BUBBLES (2026-09-13, Strato's idea): right after the welcome,
  * over the live tank - a finger anywhere on the water drags the bubble
- * column to that x (tank_set_bubble_x keeps it off the reef rock); a translucent stripe marks the column, the airstone at its foot
+ * column to that x (tank_set_bubble_x keeps it clear of the grass corner the fish rest by); a translucent stripe marks the column, the airstone at its foot
  * moves with it, the bubbles already rising shift as one.
  *
  * Naming (third design, Strato: "seeing the fish while naming it is very
@@ -52,6 +52,7 @@
 #ifndef POCKET_TANK_SETUP_H
 #define POCKET_TANK_SETUP_H
 #include "tank.h"
+#include "render.h"            /* PAGE_*: the page the layout below is on */
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -66,6 +67,17 @@ int  setup_poll_birth(tank_t *t);
  * director dropped is not due - it returns at the next boot. */
 bool setup_birth_due(void);
 void setup_begin_place(tank_t *t, int item);   /* the placement page for SD item `item` (placeable ones only) */
+/* RENAME A FISH (2026-10-01, Strato: "when you tap a fish and see its card
+ * there should be a change name button"): the letter wheel again, one page
+ * over the live tank with the fish ringed on its stage - the name page of
+ * the first run and the birth flow, CANCEL / DONE on top. DONE keeps the
+ * name and saves it (nothing left = the preset's again); CANCEL, or a flow
+ * dropped from outside, puts the old one back. The milestones page's fish
+ * card opens it (MS_TAP_RENAME); when it closes, setup_take_renamed gives
+ * the platform the fish once (else -1) so it can put that card back up. */
+void setup_begin_rename(tank_t *t, int fish);
+bool setup_is_rename(void);
+int  setup_take_renamed(void);
 bool setup_active(void);
 bool setup_is_birth(void);               /* the birth flow, not the first run */
 bool setup_is_place(void);               /* the placement page */
@@ -102,6 +114,8 @@ enum { SETUP_PG_BORN = SETUP_PG_N, SETUP_PG_NAME_NEW, SETUP_PG_FAMILY, SETUP_PG_
 #define SETUP_BIRTH_PAGES (SETUP_PG_BIRTH_END - SETUP_PG_BORN)
 /* the placement page (its own one-page flow, numbered past the birth flow's) */
 enum { SETUP_PG_PLACE = SETUP_PG_BIRTH_END };
+/* the rename page (one page too) */
+enum { SETUP_PG_RENAME = SETUP_PG_PLACE + 1 };
 /* element ids (setup_hit / setup_activate) */
 #define SETUP_HIT_NEXT  1
 #define SETUP_HIT_BACK  2
@@ -143,7 +157,7 @@ enum { SETUP_PG_PLACE = SETUP_PG_BIRTH_END };
 #define SETUP_SLOT_PX  44
 #define SETUP_SLOT_W   (5 * SETUP_SLOT_SCALE)
 #define SETUP_SLOT_H   (7 * SETUP_SLOT_SCALE)
-#define SETUP_SLOT_X   ((TANK_W - ((FISH_NAME_MAX - 1) * SETUP_SLOT_PX + SETUP_SLOT_W)) / 2)
+#define SETUP_SLOT_X   ((PAGE_W - ((FISH_NAME_MAX - 1) * SETUP_SLOT_PX + SETUP_SLOT_W)) / 2)
 #define SETUP_SLOT_Y   150
 #define SETUP_ARROW_GAP 40
 #define SETUP_SPIN_PX   30                                 /* drag travel per letter */
@@ -155,7 +169,7 @@ enum { SETUP_PG_PLACE = SETUP_PG_BIRTH_END };
 #define SETUP_SW_PX 46
 #define SETUP_SW_W  42
 #define SETUP_SW_H  60
-#define SETUP_SW_X  ((TANK_W - (SETUP_SW_N - 1) * SETUP_SW_PX - SETUP_SW_W) / 2)
+#define SETUP_SW_X  ((PAGE_W - (SETUP_SW_N - 1) * SETUP_SW_PX - SETUP_SW_W) / 2)
 #define SETUP_SW_Y  176
 #define SETUP_ACC_Y 276
 /* the family page (birth flow): the portrait ringed under the name, then
@@ -184,7 +198,7 @@ enum { SETUP_PG_PLACE = SETUP_PG_BIRTH_END };
 #define SETUP_DEPTH_W      (DECOR_Z_N * SETUP_DEPTH_SEG_W)      /* the plant's three segments; the castle's two (BEHIND / IN
                                                              * FRONT, Strato: no AMONG) are centred the same way - setup.c
                                                              * sizes the bar from tank_decor_z_count */
-#define SETUP_DEPTH_X      ((TANK_W - SETUP_DEPTH_W) / 2)
+#define SETUP_DEPTH_X      ((PAGE_W - SETUP_DEPTH_W) / 2)
 #define SETUP_DEPTH_Y      (SETUP_TOP_BTN_Y + SETUP_BTN_H + 24)
 #define SETUP_DEPTH_H      70
 #define SETUP_DEPTH_TILE_H 40
@@ -198,7 +212,7 @@ enum { SETUP_PG_PLACE = SETUP_PG_BIRTH_END };
 #define SETUP_COL_PX  SETUP_SW_PX
 #define SETUP_COL_W   SETUP_SW_W
 #define SETUP_COL_H   26
-#define SETUP_COL_X   ((TANK_W - (SETUP_COL_N - 1) * SETUP_COL_PX - SETUP_COL_W) / 2)
+#define SETUP_COL_X   ((PAGE_W - (SETUP_COL_N - 1) * SETUP_COL_PX - SETUP_COL_W) / 2)
 #define SETUP_COL_Y   (SETUP_DEPTH_Y + SETUP_DEPTH_H + 22)
 #define SETUP_PLACE_CORAL_Y (SETUP_COL_Y + SETUP_COL_H + 8)
 /* the reef cluster's page (2026-09-24): a LOOK row of CLUSTER_SCHEME_N tiles
@@ -208,12 +222,12 @@ enum { SETUP_PG_PLACE = SETUP_PG_BIRTH_END };
 #define SETUP_LOOK_W   110
 #define SETUP_LOOK_PX  118
 #define SETUP_LOOK_H   36
-#define SETUP_LOOK_X   ((TANK_W - (SETUP_LOOK_N - 1) * SETUP_LOOK_PX - SETUP_LOOK_W) / 2)
+#define SETUP_LOOK_X   ((PAGE_W - (SETUP_LOOK_N - 1) * SETUP_LOOK_PX - SETUP_LOOK_W) / 2)
 #define SETUP_LOOK_Y   SETUP_COL_Y
 #define SETUP_PLACE_CLUSTER_Y (SETUP_LOOK_Y + SETUP_LOOK_H + 8)
 /* the stage: the clear spot each page leaves for the fish being edited
  * (tank_t.stage_*), top centre between the buttons */
-#define SETUP_STAGE_X   (TANK_W / 2)
-#define SETUP_STAGE_NAME_Y 94
-#define SETUP_STAGE_LOOK_Y 112
+#define SETUP_STAGE_X   (TANK_W / 2)                    /* the stage is in the TANK: the frame's coordinates, under the page's title */
+#define SETUP_STAGE_NAME_Y (PAGE_Y + 94)
+#define SETUP_STAGE_LOOK_Y (PAGE_Y + 112)
 #endif

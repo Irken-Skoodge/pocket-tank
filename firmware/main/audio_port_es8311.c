@@ -1,9 +1,14 @@
 /* audio_port_es8311.c - I2S -> ES8311 -> NS4150B -> the 12 mm speaker.
- * See audio_port.h. Pins from resources/ESP32-S3-Touch-AMOLED-1.8.pdf. */
+ * See audio_port.h. Pins from resources/ESP32-S3-Touch-AMOLED-1.8.pdf.
+ * The WATCH (2.06) wires its bit clock and data elsewhere (41 / 40): GPIO 9
+ * and 8, the 1.8's, are its touch and panel RESET lines - never driven here
+ * on that board (board_pins.h). */
 #include "audio_port.h"
 #include "audio.h"
 #include "codec_port.h"
 #include "battery_port.h"
+#include "display_port.h"      /* board_is_watch */
+#include "board_pins.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
@@ -17,9 +22,9 @@
 static const char *TAG = "audio";
 
 #define PIN_I2S_MCLK  16
-#define PIN_I2S_BCLK  9
+#define PIN_I2S_BCLK  (board_is_watch() ? W_PIN_I2S_BCLK : 9)
 #define PIN_I2S_WS    45
-#define PIN_I2S_DOUT  8        /* ESP -> codec DSDIN */
+#define PIN_I2S_DOUT  (board_is_watch() ? W_PIN_I2S_DOUT : 8)        /* ESP -> codec DSDIN */
 #define PIN_AMP_EN    46       /* NS4150B CTRL, 10k pulldown on the board */
 #define BLOCK         160      /* 10 ms at 16 kHz */
 #define IDLE_US       (2 * 1000000LL)
@@ -62,9 +67,13 @@ static void amp(bool on) { gpio_set_level(PIN_AMP_EN, on); }
  * held. The codec is already down (audio_port_sleep) and the wake is a
  * reboot; audio_port_init releases the holds before the drivers claim the
  * pins again. */
-static const gpio_num_t QUIET_PINS[] = { PIN_I2S_MCLK, PIN_I2S_BCLK, PIN_I2S_WS, PIN_I2S_DOUT, PIN_AMP_EN };
+#define QUIET_N 5
+static void quiet_pins(gpio_num_t p[QUIET_N]) {    /* per board: known once the display port has probed the bus */
+    p[0] = PIN_I2S_MCLK; p[1] = PIN_I2S_BCLK; p[2] = PIN_I2S_WS; p[3] = PIN_I2S_DOUT; p[4] = PIN_AMP_EN;
+}
 void audio_port_deep_sleep_pins(void) {
-    for (size_t i = 0; i < sizeof QUIET_PINS / sizeof QUIET_PINS[0]; i++) {
+    gpio_num_t QUIET_PINS[QUIET_N]; quiet_pins(QUIET_PINS);
+    for (size_t i = 0; i < QUIET_N; i++) {
         gpio_num_t p = QUIET_PINS[i];
         gpio_reset_pin(p);                        /* off the I2S matrix routing, a GPIO again */
         gpio_set_direction(p, GPIO_MODE_OUTPUT);
@@ -73,7 +82,8 @@ void audio_port_deep_sleep_pins(void) {
     }
 }
 static void release_pins(void) {
-    for (size_t i = 0; i < sizeof QUIET_PINS / sizeof QUIET_PINS[0]; i++) gpio_hold_dis(QUIET_PINS[i]);
+    gpio_num_t QUIET_PINS[QUIET_N]; quiet_pins(QUIET_PINS);
+    for (size_t i = 0; i < QUIET_N; i++) gpio_hold_dis(QUIET_PINS[i]);
 }
 
 static void write_silence(int ms) {
@@ -95,6 +105,9 @@ static void bring_up(void) {
     write_silence(s_settle_amp_ms);           /* the NS4150B's own start-up (pop suppression): an 80 ms card
                                                  cue landed inside it at 30 ms, and mostly still at 30+40 */
     s_up = true; s_quiet_since = 0;
+    s_warm_req = false;                         /* every prewarm asked for while this came up (the tank asks each frame it is
+                                                   handled) is answered: left standing, it brought the port straight back up
+                                                   after its next down - at a sleep, for the whole sleep (2026-10-01) */
     ESP_LOGI(TAG, "up in %lld ms%s", (esp_timer_get_time() - t0) / 1000, ok ? "" : " (codec writes FAILED)");
 }
 /* power down: amp -> zeros -> clocks off -> codec down -> rail */
@@ -130,9 +143,11 @@ static void player(void *arg) {
         if (live) s_quiet_since = 0;
         else if (!s_quiet_since) s_quiet_since = now;
         if (s_sleep_req || (s_idle_us && s_quiet_since && now - s_quiet_since > s_idle_us)) {
-            if (s_sleep_req) { xSemaphoreTake(s_mx, portMAX_DELAY); audio_stop_all(); xSemaphoreGive(s_mx); }
+            bool sleeping = s_sleep_req;
+            if (sleeping) { xSemaphoreTake(s_mx, portMAX_DELAY); audio_stop_all(); xSemaphoreGive(s_mx); }
             bring_down();
             s_sleep_req = false;
+            if (sleeping) { s_warm_req = false; ulTaskNotifyTake(pdTRUE, 0); }   /* down for a sleep stays down: no standing request, no pending nudge */
         }
     }
 }

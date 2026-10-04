@@ -34,8 +34,32 @@ static bool rtc_write(const struct tm *t) {
     return i2c_master_transmit(s_dev, w, sizeof w, 100) == ESP_OK;
 }
 
+static time_t build_unix(void) {                        /* "Aug 21 2026" "10:15:00" */
+    static const char mon[] = "JanFebMarAprMayJunJulAugSepOctNovDec";
+    char ms[4] = {0}; int d = 1, y = 2026, hh = 0, mm = 0, ss = 0;
+    sscanf(__DATE__, "%3s %d %d", ms, &d, &y); sscanf(__TIME__, "%d:%d:%d", &hh, &mm, &ss);
+    struct tm t; memset(&t, 0, sizeof t);
+    const char *m = strstr(mon, ms);
+    t.tm_mon = m ? (int)((m - mon) / 3) : 0; t.tm_mday = d; t.tm_year = y - 1900;
+    t.tm_hour = hh; t.tm_min = mm; t.tm_sec = ss;
+    return mktime(&t);
+}
+void rtc_port_seed(int64_t not_before) {
+    time_t at = build_unix();
+    if (not_before > (int64_t)at) at = (time_t)not_before;
+    struct timeval tv = { .tv_sec = at }; settimeofday(&tv, NULL);
+    ESP_LOGI(TAG, "no RTC chip: the system clock starts at %s (it runs through deep sleep, not through a power cut)",
+             not_before > 0 && (time_t)not_before == at ? "the save's stamp" : "the build time");
+}
 bool rtc_port_init(i2c_master_bus_handle_t bus) {
     i2c_device_config_t cfg = { .dev_addr_length = I2C_ADDR_BIT_LEN_7, .device_address = PCF85063_ADDR, .scl_speed_hz = 400000 };
+    /* a board with no RTC chip (the round 1.75C): the system clock stays unset,
+       so clock_port_now_unix says 0 = unknown - a build-time seed with nothing
+       to keep it would read as a real clock and every flash as time away */
+    if (bus && i2c_master_probe(bus, PCF85063_ADDR, 50) != ESP_OK) {
+        ESP_LOGW(TAG, "no RTC chip on this board: the ESP32's own clock (%s)", time(NULL) > 1700000000 ? "still running from before this boot" : "unset: seeded once the save is loaded");
+        return false;
+    }
     if (!bus || i2c_master_bus_add_device(bus, &cfg, &s_dev) != ESP_OK) { ESP_LOGW(TAG, "no RTC"); return false; }
     struct tm t;
     if (rtc_read(&t) && t.tm_year + 1900 >= 2024) {
