@@ -29,14 +29,14 @@ pipeline that made it, a PC simulator, and the firmware for a real board.
 Got the board? **[Install it from your browser](https://pocketank.com/install/)**,
 no toolchain needed.
 
-The current release is **v0.3.0** (alpha); the settings page shows the one
+The current release is **v0.3.1** (alpha); the settings page shows the one
 on your tank. What changed in each release:
 **[pocketank.com/updates](https://pocketank.com/updates/)**.
 
 It runs on three Waveshare boards: the 1.8-inch original, the round
 1.75-inch **pendant**, where the tank fills the whole circle like a little
 fishbowl, and the 2.06-inch **watch**, a tall tank you can wear. Same fish,
-same shop, same saves on all three. From 0.3.0 on a tank updates itself
+same shop, same saves on all three. From 0.3 on a tank updates itself
 over Wi-Fi, so the cable is only for the first install.
 
 | The 1.8 | The pendant | The watch |
@@ -554,7 +554,7 @@ it and set it up on the tank instead. About
 8 MB goes over in a minute or two, the board reboots on its own, and two fry
 are waiting.
 
-**After that, updates come over Wi-Fi.** 0.3.0 is the last release that
+**After that, updates come over Wi-Fi.** 0.3 is the last release that
 needs the cable: a tank on 0.2 installs it from the page once, and from
 then on CHECK FOR UPDATES on the settings page does the rest. Each board
 fetches only its own image, every image is signed, and a tank refuses one
@@ -570,7 +570,7 @@ at the tail, and the one field that went in mid-struct is slid into place on
 load). To start over, hold BOOT and tap the glass for the *Reset tank?*
 prompt; the page also has an "erase and install fresh" button for a board
 that won't get that far. The settings page shows the release at its foot,
-small and dim ("V0.3.0 ALPHA", then the build id), so you can tell what
+small and dim ("V0.3.1 ALPHA", then the build id), so you can tell what
 you run. It is the same mechanism ESPHome and Home
 Assistant use ([ESP Web Tools](https://esphome.github.io/esp-web-tools/)),
 running entirely in the browser over Web Serial.
@@ -738,7 +738,7 @@ seven-minute prompt check before an overnight run is always worth it.
 - ✅ v0.2.0 (alpha), the first numbered release: fish that turn like fish,
   the fish's name on its card, a shrimp school that eats what falls and
   multiplies, and a fry's welcome that comes before its badges
-- ✅ v0.3.0 (alpha): two more boards (the round pendant and the watch),
+- ✅ v0.3 (alpha): two more boards (the round pendant and the watch),
   updates over Wi-Fi with signed, per-board images, a sea urchin that keeps
   the grass down, a snail that cleans overnight, a sponge and scissors, and
   fish you can rename or sell

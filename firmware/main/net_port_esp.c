@@ -286,10 +286,24 @@ static void do_check(void) {
     if (!c) { s_err = NET_ERR_NO_NET; s_state = NET_FAILED; return; }
     char *buf = heap_caps_malloc(4096, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     int err = NET_ERR_NO_NET, n = 0;
-    if (buf && esp_http_client_open(c, 0) == ESP_OK) {
-        int64_t len = esp_http_client_fetch_headers(c);
-        int status = esp_http_client_get_status_code(c);
-        (void)len;
+    /* GitHub answers a release asset's address with a redirect, twice (releases/latest/download ->
+     * releases/download/<tag> -> the asset host, a 900-byte signed address). The open / fetch_headers
+     * pair used here does NOT follow redirects by itself (only esp_http_client_perform does): 0.3.0's
+     * first build read the 302 as the answer and said NO ANSWER to every check against the real
+     * release - a tank that could never see an update (2026-10-04; the rehearsal's files sat on a
+     * host that answers directly). Follow them by hand, a few hops at most. */
+    int status = 0;
+    for (int hop = 0; buf && hop < 6; hop++) {
+        if (esp_http_client_open(c, 0) != ESP_OK) { status = 0; break; }
+        (void)esp_http_client_fetch_headers(c);
+        status = esp_http_client_get_status_code(c);
+        if (status != 301 && status != 302 && status != 303 && status != 307 && status != 308) break;
+        ESP_LOGI(TAG, "manifest: HTTP %d, following the redirect (hop %d)", status, hop + 1);
+        if (esp_http_client_set_redirection(c) != ESP_OK) break;
+        int drained = 0; esp_http_client_flush_response(c, &drained);
+        esp_http_client_close(c);
+    }
+    if (buf && status) {
         while (n < 4095) { int r = esp_http_client_read(c, buf + n, 4095 - n); if (r <= 0) break; n += r; }
         buf[n] = 0;
         if (status == 200 && n > 0) err = parse_manifest(buf, &s_m) ? NET_ERR_NONE : NET_ERR_BAD_MANIFEST;
