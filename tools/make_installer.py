@@ -39,7 +39,7 @@ so a build dir in the wrong slot can never ship under another board's name.
 
 Web Serial needs a secure context: serve the folder over HTTPS (or from
 http://localhost for a local check: `python3 -m http.server -d installer/dist`)."""
-import argparse, datetime, hashlib, json, os, re, shutil, struct, subprocess, sys
+import argparse, datetime, hashlib, json, os, re, shutil, struct, subprocess, sys, tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from pt_boards import BOARDS, board_of_image, name_of, build_of_image
 
@@ -215,7 +215,10 @@ def main():
         parts.append((model_offset(), a.model, "model_q4.bin"))
         if os.path.getsize(a.model) > model_part()[1] - TRAILER_SIZE:
             sys.exit(f"{a.model}: {os.path.getsize(a.model):,} B does not leave the model partition's last sector for the trailer")
-        trailer = os.path.join(build_dir, "model_trailer.bin")
+        # the trailer is made in a scratch folder, never in the build dir: in CI the build dirs are
+        # root-owned (the ESP-IDF action's docker) and the public repo's first 0.3.0 installer run
+        # died here (2026-10-04; make_ota_manifest.py had the same fault at the rehearsal)
+        trailer = os.path.join(tempfile.mkdtemp(prefix="pt-trailer-"), "model_trailer.bin")
         subprocess.run([sys.executable, os.path.join(ROOT, "tools", "model_trailer.py"), "--model", a.model, "--out", trailer, "--check"], check=True)
         parts.append((model_trailer_offset(), trailer, "model_trailer.bin"))
         parts.sort()
