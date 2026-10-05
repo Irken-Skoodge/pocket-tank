@@ -1964,9 +1964,11 @@ void render_tank(const tank_t *t, uint16_t *fb, int stride) {
         g_bb_on = false;
         if (g_bb_x1 >= g_bb_x0) DYN_RECT(g_bb_x0, g_bb_y0, g_bb_x1, g_bb_y1);
     }
-    /* the snail on the floor (upright): in the scene, under the front fronds */
+    /* the snail on the floor (upright): in the scene, under the front fronds -
+       unless it walks its front lane (tank_t.snail_front), drawn below, over
+       the pieces placed IN FRONT */
     if (tank_snail_upright(t)) {
-        draw_snail(&c, t, true);
+        if (!t->snail_front) draw_snail(&c, t, true);
         DYN_RECT((int)t->snail_x - 21, (int)t->snail_y - 13, (int)t->snail_x + 21, (int)t->snail_y + 7);
     }
     /* the urchin on the floor: with the fish, under the front fronds - at a
@@ -2003,6 +2005,7 @@ void render_tank(const tank_t *t, uint16_t *fb, int stride) {
         else draw_coral(&c, kx, krgb, kg, cached);
         CORAL_CROWN();
     }
+    if (tank_snail_upright(t) && t->snail_front) draw_snail(&c, t, true);   /* its front lane: over them (its rect is marked above) */
     PROF_ADD(4, p0);
     /* porthole vignette: darken corners toward AMOLED black. With a scene
        cache the full-frame pass is baked into the scene and only the dynamic
@@ -2353,7 +2356,8 @@ static void urchin_card_draw(ctx_t *c, const tank_t *t) {
     draw_text(c, X + (W - text_w(cap, 2)) / 2, Y + 118, 2, 0x9fd8e2, cap);
     char n[24]; int cm = (int)(t->urchin_grazed_px / PX_PER_CM);
     if (cm < 1) snprintf(n, sizeof n, "NOTHING YET");
-    else snprintf(n, sizeof n, "%d CM", cm);
+    else if (cm < 1000) snprintf(n, sizeof n, "%d CM", cm);
+    else snprintf(n, sizeof n, "%d.%dK CM", cm / 1000, cm % 1000 / 100);   /* 1.0K CM and up: the line never outgrows the card (0.3.2) */
     draw_text(c, X + (W - text_w(n, 3)) / 2, Y + 140, 3, 0xffffff, n);
     const char *now = tank_urchin_chewing(t) ? "CHEWING"
                     : t->urchin_frond >= 0 ? "OFF TO THE TALL GRASS"
@@ -3549,16 +3553,16 @@ void render_sd_toast(const tank_t *t, uint16_t *fb, int stride) {
  * The milestones page's foot used to carry the brightness row; Strato:
  * "a new UI for settings and leave milestones alone - we may need more
  * room there anyway". Rows of segment buttons, generous hit bands (fingers
- * land low near the bezel, as on the milestones page), and since the light
- * became the idle detector's (the same evening) a LIGHTS OUT row - ON / OFF
- * (MANUAL, the default = the double-tap on the glass; AUTO = the idle rule,
- * the keeper's opt-in) with the idle time under it as one number: swipe it
- * up or down, or tap the chevrons; the default is LIGHT_IDLE_S. */
+ * land low near the bezel, as on the milestones page). 0.3.2: LIGHTS OUT is
+ * one row (a value between two arrows, where MANUAL / AUTO and a big seconds
+ * selector stood), and AUTO FEED and ROTATION have the room it gave back. */
 /* (the page's numbers, SET_*: render.h) */
 static const char *const SET_BRIGHT[3] = { "30%", "60%", "100%" };
 static const int         SET_BRIGHT_PCT[3] = { 30, 60, 100 };
 static const char *const SET_VOLUME[3] = { "OFF", "QUIET", "NORMAL" };
-static const char *const SET_LIGHT[2]  = { "MANUAL", "AUTO" };   /* the default first */
+static const char *const SET_LIGHT[LIGHT_IDLE_N + 1] = { "DOUBLE-TAP",   /* MANUAL, the default: the row says how the light is worked */
+    "5 SEC", "15 SEC", "30 SEC", "1 MIN", "3 MIN", "5 MIN", "10 MIN", "30 MIN" };
+static const char *const SET_FEED[2]   = { "ON", "OFF" };          /* the default first */
 #if TANK_WORN
 static const char *const SET_SCREEN[2] = { "NORMAL", "TURNED" };   /* the default first */
 #endif
@@ -3573,12 +3577,34 @@ static void set_row(ctx_t *c, int row_y, const char *label, const char *const na
         } else button(c, x, y, SET_SEG_W, SET_SEG_H, 0x1c2f36, MSP_DIM, names[i], 2);
     }
 }
-static void set_chevron(ctx_t *c, int cx, int y, bool up, uint32_t rgb) {   /* the setup's, a size down */
-    for (int i = 0; i < 4; i++) {
-        int yy = up ? y + i * 3 : y - i * 3;
-        rect_fill(c, cx - 3 - i * 3, yy, 3, 3, rgb);
-        rect_fill(c, cx + i * 3, yy, 3, 3, rgb);
+/* an arrow button of the LIGHTS OUT row: dim at the end of the list */
+static void set_arrow(ctx_t *c, int x, int y, bool right, bool live) {
+    uint32_t rgb = live ? MSP_TEAL : 0x2c4a52;
+    button(c, x, y, SET_ARW_W, SET_SEG_H, 0x1c2f36, rgb, "", 2);
+    int cx = x + SET_ARW_W / 2, cy = y + SET_SEG_H / 2;
+    for (int i = 0; i < 7; i++) {                           /* a solid triangle, 7 wide, 13 tall */
+        int px = right ? cx - 3 + i : cx + 3 - i, hh = 6 - i;
+        rect_fill(c, px, cy - hh, 1, 2 * hh + 1, rgb);
     }
+}
+/* ROTATION's picture: a padlock inside a turning arrow - shut when the way
+ * up is locked, its shackle swung open while the picture follows the tank
+ * (the two differ in shape, not in color alone) */
+static void set_lock_icon(ctx_t *c, int cx, int cy, bool locked, uint32_t rgb) {
+    for (int dy = -15; dy <= 15; dy++)                      /* the ring, open at the top right */
+        for (int dx = -15; dx <= 15; dx++) {
+            float r2 = (float)(dx * dx + dy * dy);
+            if (r2 < 11.5f * 11.5f || r2 > 14.0f * 14.0f) continue;
+            if (dx > 1 && dy < 0 && dy < -dx * 0.45f) continue;
+            px_blend(c, cx + dx, cy + dy, rgb, 255);
+        }
+    for (int i = 0; i < 6; i++)                             /* its arrowhead, at the top, pointing clockwise */
+        rect_fill(c, cx + 1 + i, cy - 13 - (5 - i), 1, 2 * (5 - i) + 1, rgb);
+    rect_fill(c, cx - 6, cy - 1, 12, 8, rgb);              /* the padlock's body */
+    int top = locked ? cy - 7 : cy - 10;                    /* the shackle: down in the body, or lifted with one leg free */
+    rect_fill(c, cx - 4, top, 8, 2, rgb);
+    rect_fill(c, cx - 4, top, 2, cy - 1 - top, rgb);
+    rect_fill(c, cx + 2, top, 2, locked ? cy - 1 - top : 4, rgb);
 }
 void render_settings(const tank_t *t, uint16_t *fb, int stride, int bright_pct, int volume) {
     ctx_t c = ctx_page(fb, stride);
@@ -3588,27 +3614,32 @@ void render_settings(const tank_t *t, uint16_t *fb, int stride, int bright_pct, 
     set_row(&c, SET_ROW1_Y, "BRIGHTNESS", SET_BRIGHT, 3, bi);
     set_row(&c, SET_ROW2_Y, "VOLUME", SET_VOLUME, 3, volume < 0 ? 0 : volume > 2 ? 2 : volume);
     draw_text(&c, SET_LABEL_X, SET_NOTE_Y, 2, MSP_DIM, "FISH ARE QUIET AT NIGHT");
-    set_row(&c, SET_ROW3_Y, "LIGHTS OUT", SET_LIGHT, 2, t->light_auto ? 1 : 0);
-    if (t->light_auto) {
-        /* AUTO: AFTER [ n ] SEC, the number with its chevrons */
-        char num[8]; snprintf(num, sizeof num, "%d", t->light_idle_s);
-        int nw = text_w(num, SET_NUM_SCALE), nx = SET_NUM_X + SET_NUM_BOX_W - nw, cx = SET_NUM_X + SET_NUM_BOX_W / 2;
-        draw_text(&c, SET_LABEL_X, SET_AFTER_Y, 2, MSP_TEAL, "AFTER");
-        draw_text(&c, nx, SET_NUM_Y, SET_NUM_SCALE, 0xffffff, num);
-        rect_fill(&c, SET_NUM_X, SET_NUM_Y + SET_NUM_H + 6, SET_NUM_BOX_W, 3, 0x3f6a72);
-        set_chevron(&c, cx, SET_NUM_Y - SET_NUM_GAP, true, MSP_TEAL);
-        set_chevron(&c, cx, SET_NUM_Y + SET_NUM_H + SET_NUM_GAP + 3, false, MSP_TEAL);
-        draw_text(&c, SET_NUM_X + SET_NUM_BOX_W + 10, SET_AFTER_Y, 2, MSP_TEAL, "SEC");
-    } else {
-        /* MANUAL: how to work the light instead */
-        draw_text(&c, SET_LABEL_X, SET_NUM_Y - 8, 2, MSP_TEAL, "DOUBLE-TAP THE GLASS TO");
-        draw_text(&c, SET_LABEL_X, SET_NUM_Y + 14, 2, MSP_TEAL, "TURN THE LIGHT ON OR OFF");
+    /* LIGHTS OUT: < the choice > */
+    {
+        int ch = tank_light_choice(t), y = SET_SEG_Y(SET_ROW3_Y);
+        int bx = SET_SEG_X + SET_ARW_W + 4, bw = SET_SPAN_W - 2 * (SET_ARW_W + 4);
+        draw_text(&c, SET_LABEL_X, SET_ROW3_Y, 2, MSP_TEAL, "LIGHTS OUT");
+        set_arrow(&c, SET_SEG_X, y, false, ch > 0);
+        button(&c, bx, y, bw, SET_SEG_H, MSP_TEAL, MSP_TEAL, "", 2);
+        draw_text(&c, bx + (bw - text_w(SET_LIGHT[ch], 2)) / 2, y + (SET_SEG_H - 14) / 2, 2, MSP_INK, SET_LIGHT[ch]);
+        set_arrow(&c, SET_SEG_X + SET_SPAN_W - SET_ARW_W, y, true, ch < LIGHT_IDLE_N);
     }
+    set_row(&c, SET_ROW4_Y, "AUTO FEED", SET_FEED, 2, t->autofeed_off ? 1 : 0);
 #if TANK_WORN
     /* SCREEN (2026-10-02): the way up of a watch worn either way round - TURNED
        for buttons toward the elbow. The picture turns as the finger lifts. */
-    set_row(&c, SET_ROW4_Y, "SCREEN", SET_SCREEN, 2, t->screen_turned ? 1 : 0);
-    draw_text(&c, SET_LABEL_X, SET_NOTE4_Y, 2, MSP_DIM, "WORN THE OTHER WAY AROUND?");
+    set_row(&c, SET_ROW5_Y, "SCREEN", SET_SCREEN, 2, t->screen_turned ? 1 : 0);
+    draw_text(&c, SET_LABEL_X, SET_NOTE5_Y, 2, MSP_DIM, "WORN THE OTHER WAY AROUND?");
+#else
+    /* ROTATION (0.3.2): the picture turns over with the tank, unless locked */
+    {
+        int x = SET_SEG_X, y = SET_SEG_Y(SET_ROW5_Y);
+        draw_text(&c, SET_LABEL_X, SET_ROW5_Y, 2, MSP_TEAL, "ROTATION");
+        if (t->orient_lock) button(&c, x, y, SET_SEG_W, SET_SEG_H, MSP_TEAL, MSP_TEAL, "", 2);
+        else                button(&c, x, y, SET_SEG_W, SET_SEG_H, 0x1c2f36, MSP_DIM, "", 2);
+        set_lock_icon(&c, x + SET_SEG_W / 2, y + SET_SEG_H / 2 + 1, t->orient_lock, t->orient_lock ? MSP_INK : MSP_TEAL);
+        draw_text(&c, SET_ROT_WORD_X, SET_ROW5_Y, 2, t->orient_lock ? 0xffffff : MSP_DIM, t->orient_lock ? "LOCKED" : "UNLOCKED");
+    }
 #endif
     /* the firmware version, hugging the bottom left of the frame (6 px up,
        on the labels' x; the bezel's curve is clear there), small (8 px) and
@@ -3625,8 +3656,7 @@ void render_settings(const tank_t *t, uint16_t *fb, int stride, int bright_pct, 
     draw_text_8px(&c, SET_LABEL_X + (PAGE_BOWL ? 96 : 0), PAGE_H - 8 - 6, MSP_DIM, ver);
 #endif
     button(&c, SET_CLOSE_X, SET_FOOT_Y, MSP_CLOSE_W, MSP_CLOSE_H, 0x1c2f36, MSP_TEAL, "CLOSE", 2);
-    /* UPDATES (2026-09-30, docs/OTA.md): bottom left, the same size as CLOSE,
-       clear of the seconds selector's down chevron (x 160..288) */
+    /* UPDATES (2026-09-30, docs/OTA.md): bottom left, the same size as CLOSE */
     button(&c, SET_UPD_X, SET_FOOT_Y, SET_UPD_W, MSP_CLOSE_H, 0x1c2f36, MSP_TEAL, "UPDATES", 2);
 }
 static int set_segment(float x, int n) {
@@ -3635,66 +3665,58 @@ static int set_segment(float x, int n) {
     return i < 0 ? 0 : i >= n ? n - 1 : i;
 }
 /* the hit test: what a TAP at (x,y) means. *value: BRIGHT the percent,
- * VOLUME 0..2, LIGHT 1 = AUTO / 0 = MANUAL; the number's own hits carry no
- * value (IDLE_UP / IDLE_DOWN the chevrons, IDLE_NUM the number itself). */
-enum { SET_HIT_IDLE_NUM = 100, SET_HIT_IDLE_UP, SET_HIT_IDLE_DOWN };
+ * VOLUME 0..2, FEED 1 = ON, SCREEN 1 = TURNED; ROTATE carries none (a
+ * toggle); the LIGHTS OUT row's own hits are LIGHT_PREV / LIGHT_NEXT (its
+ * left and right halves). */
+enum { SET_HIT_LIGHT_PREV = 100, SET_HIT_LIGHT_NEXT };
 int render_settings_tap(float x, float y, int *value) {
     x -= PAGE_X; y -= PAGE_Y;                    /* the page's own coordinates */
     if (x >= SET_CLOSE_X - 8 && y >= SET_FOOT_Y - 4) return SET_TAP_CLOSE;
-    if (x < SET_UPD_X + SET_UPD_W + 8 && y >= SET_FOOT_Y - 4) return SET_TAP_UPDATES;   /* before the number's band below the chevron */
-#if TANK_WORN
-    if (y >= SET_SEG_Y(SET_ROW4_Y) - 12 && y < SET_FOOT_Y - 4) { int sg = set_segment(x, 2); if (sg < 0) return SET_TAP_NONE; *value = sg == 1; return SET_TAP_SCREEN; }
-#endif
+    if (x < SET_UPD_X + SET_UPD_W + 8 && y >= SET_FOOT_Y - 4) return SET_TAP_UPDATES;
     /* the row bands: from a little above each segment down to the next row
-       (fingers report low); the LIGHTS OUT band ends just under its
-       segments so the number's up chevron below is its own */
-    int seg = set_segment(x, 3);
+       (fingers report low); the last one stops at the foot's */
+    int seg = set_segment(x, 3), two = set_segment(x, 2);
     if (y >= SET_SEG_Y(SET_ROW1_Y) - 12 && y < SET_SEG_Y(SET_ROW2_Y) - 12) { if (seg < 0) return SET_TAP_NONE; *value = SET_BRIGHT_PCT[seg]; return SET_TAP_BRIGHT; }
     if (y >= SET_SEG_Y(SET_ROW2_Y) - 12 && y < SET_SEG_Y(SET_ROW3_Y) - 12) { if (seg < 0) return SET_TAP_NONE; *value = seg; return SET_TAP_VOLUME; }
-    if (y >= SET_SEG_Y(SET_ROW3_Y) - 12 && y < SET_LIGHT_BAND_END)          { seg = set_segment(x, 2); if (seg < 0) return SET_TAP_NONE; *value = seg == 1; return SET_TAP_LIGHT; }
-    if (y >= SET_LIGHT_BAND_END && y < SET_NUM_END && x >= SET_NUM_X - 30 && x < SET_NUM_X + SET_NUM_BOX_W + 30) {
-        *value = 0;
-        if (y < SET_NUM_Y - 8) return SET_HIT_IDLE_UP;                     /* the band above the number */
-        if (y < SET_NUM_Y + SET_NUM_H + 14) return SET_HIT_IDLE_NUM;      /* the number */
-        return SET_HIT_IDLE_DOWN;                                          /* below, down to the bezel */
+    if (y >= SET_SEG_Y(SET_ROW3_Y) - 12 && y < SET_SEG_Y(SET_ROW4_Y) - 12) { if (seg < 0) return SET_TAP_NONE; *value = 0; return x < SET_SPAN_MID ? SET_HIT_LIGHT_PREV : SET_HIT_LIGHT_NEXT; }
+    if (y >= SET_SEG_Y(SET_ROW4_Y) - 12 && y < SET_SEG_Y(SET_ROW5_Y) - 12) { if (two < 0) return SET_TAP_NONE; *value = two == 0; return SET_TAP_FEED; }
+    if (y >= SET_SEG_Y(SET_ROW5_Y) - 12 && y < SET_FOOT_Y - 4) {
+        if (two < 0) return SET_TAP_NONE;
+#if TANK_WORN
+        *value = two == 1; return SET_TAP_SCREEN;
+#else
+        *value = 0; return SET_TAP_ROTATE;       /* the button or its word: one toggle */
+#endif
     }
     return SET_TAP_NONE;
 }
-static void set_step(tank_t *t, int dir) {
-    int v = t->light_idle_s + dir;
-    if (v < LIGHT_IDLE_MIN_S) v = LIGHT_IDLE_MIN_S;
-    if (v > LIGHT_IDLE_MAX_S) v = LIGHT_IDLE_MAX_S;
-    if (v != t->light_idle_s) { t->light_idle_s = v; tank_emit(TEV_WHEEL_TICK, -1); }
-}
 int render_settings_touch(tank_t *t, float x, float y, bool down, int *value) {
-    static bool s_down, s_spun; static float s_px, s_py, s_ly, s_acc; static int s_hit, s_hv;
+    static bool s_down; static float s_px, s_py; static int s_hit, s_hv;
     int r = SET_TAP_NONE; *value = 0;
-    bool on_num = s_hit == SET_HIT_IDLE_NUM || s_hit == SET_HIT_IDLE_UP || s_hit == SET_HIT_IDLE_DOWN;
     if (down && !s_down) {                                  /* press */
-        s_px = x; s_py = y; s_ly = y; s_acc = 0; s_spun = false;
+        s_px = x; s_py = y;
         s_hit = render_settings_tap(x, y, &s_hv);
-    } else if (down && on_num && t->light_auto) {            /* the number: vertical travel steps the value */
-        s_acc += y - s_ly;
-        while (s_acc <= -SET_STEP_PX) { set_step(t, +1); s_acc += SET_STEP_PX; s_spun = true; }   /* up = more seconds */
-        while (s_acc >=  SET_STEP_PX) { set_step(t, -1); s_acc -= SET_STEP_PX; s_spun = true; }
-        s_ly = y;
-    } else if (!down && s_down) {                           /* release: a tap, unless the number was swiped */
-        if (s_spun) { progression_settings_changed(); r = SET_TAP_IDLE; *value = t->light_idle_s; }
-        else {
-            int v = 0, h = render_settings_tap(x, y, &v);
-            float dx = x - s_px, dy = y - s_py;
-            if (h == s_hit && dx * dx + dy * dy < 24 * 24) {
-                if (h == SET_TAP_LIGHT) {                           /* MANUAL (0, the default) / AUTO (1); either way the light comes on */
-                    t->light_auto = v != 0; t->light_manual_off = false; progression_settings_changed();
-                    r = SET_TAP_LIGHT; *value = v;
-                } else if ((h == SET_HIT_IDLE_UP || h == SET_HIT_IDLE_DOWN) && t->light_auto) {
-                    set_step(t, h == SET_HIT_IDLE_UP ? +1 : -1); progression_settings_changed();
-                    r = SET_TAP_IDLE; *value = t->light_idle_s;
-                } else if (h == SET_TAP_SCREEN) {                  /* the way up: NORMAL (0, the default) / TURNED (1) */
-                    if ((v != 0) != t->screen_turned) { tank_screen_set(t, v != 0); progression_settings_changed(); }
-                    r = SET_TAP_SCREEN; *value = v;
-                } else if (h == SET_TAP_CLOSE || h == SET_TAP_BRIGHT || h == SET_TAP_VOLUME || h == SET_TAP_UPDATES) { r = h; *value = v; }
-            }
+    } else if (!down && s_down) {                           /* release: a tap, if it stayed on what it pressed */
+        int v = 0, h = render_settings_tap(x, y, &v);
+        float dx = x - s_px, dy = y - s_py;
+        if (h == s_hit && dx * dx + dy * dy < 24 * 24) {
+            if (h == SET_HIT_LIGHT_PREV || h == SET_HIT_LIGHT_NEXT) {   /* one choice along; either way the light comes on */
+                int was = tank_light_choice(t), now = was + (h == SET_HIT_LIGHT_NEXT ? 1 : -1);
+                if (now >= 0 && now <= LIGHT_IDLE_N) {
+                    tank_light_choice_set(t, now); tank_emit(TEV_WHEEL_TICK, -1); progression_settings_changed();
+                    if ((was == 0) != (now == 0)) { r = SET_TAP_LIGHT; *value = now != 0; }
+                    else { r = SET_TAP_IDLE; *value = t->light_idle_s; }
+                }
+            } else if (h == SET_TAP_FEED) {                    /* ON (1, the default) / OFF */
+                if ((v == 0) != t->autofeed_off) { t->autofeed_off = v == 0; progression_settings_changed(); }
+                r = SET_TAP_FEED; *value = v;
+            } else if (h == SET_TAP_ROTATE) {                  /* lock the way up it has now, or let it turn again */
+                tank_orient_lock(t, !t->orient_lock); progression_settings_changed();
+                r = SET_TAP_ROTATE; *value = t->orient_lock;
+            } else if (h == SET_TAP_SCREEN) {                  /* the way up: NORMAL (0, the default) / TURNED (1) */
+                if ((v != 0) != t->screen_turned) { tank_screen_set(t, v != 0); progression_settings_changed(); }
+                r = SET_TAP_SCREEN; *value = v;
+            } else if (h == SET_TAP_CLOSE || h == SET_TAP_BRIGHT || h == SET_TAP_VOLUME || h == SET_TAP_UPDATES) { r = h; *value = v; }
         }
     }
     s_down = down;

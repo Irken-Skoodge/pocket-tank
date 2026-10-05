@@ -362,6 +362,13 @@ typedef struct tank {
     bool     light_tip_seen;       /* a double-tap has turned the light off once: its notice (notice.h
                                     * NOTICE_LIGHTS_OUT) came up then, and never again (saved) */
     bool     screen_turned;        /* a worn tank (TANK_WORN): settings SCREEN = TURNED (saved) */
+    bool     orient_lock;          /* settings ROTATION = locked (0.3.2, saved): the picture keeps the way up it
+                                    * had when the keeper locked it, however the tank is turned (tank_orient) */
+    bool     orient_inv;           /* the picture's way up now, true = turned over: the platform's live flip,
+                                    * or what the lock froze (saved with the lock) */
+    bool     autofeed_off;         /* settings AUTO FEED = OFF (0.3.2, saved): the tank's own trickle never
+                                    * drops a pellet - feeding is the keeper's alone. Nobody dies of it; a
+                                    * fish left starving in a lit tank slowly loses trust (progression.c) */
     bool     light_override;       /* director / sim took manual control of the light.
                                     * Not saved (a saved override once froze a tank in
                                     * permanent day and starved a milestone). */
@@ -435,6 +442,11 @@ typedef struct tank {
     float    snail_x, snail_y, snail_heading;
     int16_t  snail_cell;           /* the algae cell it is heading for, -1 = wandering */
     float    snail_graze;          /* seconds on the current cell */
+    bool     snail_front;          /* walking the floor, it passes IN FRONT of a reef cluster or coral placed
+                                    * IN FRONT (0.3.2, Strato: "it marches to the beat of its own drum" - the
+                                    * big cluster hid it for most of its walk). Its own choice, made again at
+                                    * each end of the floor; off the glass it lands in front, where it was.
+                                    * Not saved. */
     int32_t  snail_grazed;         /* algae cells it has grazed clean, lifetime (its card,
                                     * 2026-09-16; saved) */
     float    snail_sleep_acc;      /* the night shift's part-cells: a nap's few minutes still count
@@ -626,7 +638,16 @@ void  tank_tick_sleep(tank_t *t, float seconds);
  * glass, then a pause, flip light_manual_off. AUTO clears it. */
 #define LIGHT_IDLE_S     15        /* the default, seconds (tank_t.light_idle_s) */
 #define LIGHT_IDLE_MIN_S 5
-#define LIGHT_IDLE_MAX_S 999       /* three digits on the settings wheel */
+#define LIGHT_IDLE_MAX_S 1800      /* the settings page's longest choice, 30 min (0.3.2: its choices are
+                                      LIGHT_IDLE_CHOICES; until then a wheel of 5..999 s) */
+/* the settings page's LIGHTS OUT choices (0.3.2): the double-tap (MANUAL,
+ * the default), or AUTO after one of these many seconds still. A save from
+ * the wheel's days holds any 5..999: it is honoured as it is and shown as
+ * the nearest choice until the keeper steps the row. */
+#define LIGHT_IDLE_N 8
+extern const int LIGHT_IDLE_CHOICES[LIGHT_IDLE_N];
+int   tank_light_choice(const tank_t *t);            /* 0 = MANUAL, 1..LIGHT_IDLE_N = AUTO after LIGHT_IDLE_CHOICES[n - 1] */
+void  tank_light_choice_set(tank_t *t, int choice);  /* (clamped; the light comes on either way) */
 void  tank_handled(tank_t *t);
 void  tank_toggle_light(tank_t *t);
 void  tank_light_auto(tank_t *t);
@@ -643,6 +664,14 @@ void  tank_light_auto(tank_t *t);
  * progression_settings_changed). Every other build: never turned. */
 bool  tank_screen_turned(const tank_t *t);
 void  tank_screen_set(tank_t *t, bool turned);
+/* The way up on a desk tank or the pendant (0.3.2, @brandonn5371's ask): the
+ * picture follows the IMU's 180-degree flip unless settings' ROTATION is
+ * locked. The platform hands tank_orient its live reading every frame and
+ * shows what comes back: the reading itself, or - locked - the way up the
+ * picture had at the lock (saved, so a locked tank boots the same way up).
+ * tank_orient_lock is the settings page's toggle. */
+bool  tank_orient(tank_t *t, bool live_inverted);
+void  tank_orient_lock(tank_t *t, bool lock);
 
 /* Touch input (platform feeds these; sim = mouse, device = FT3168):
  *  tank_touch_hold: call EVERY FRAME while a finger rests on the glass at x,y.

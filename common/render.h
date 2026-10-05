@@ -277,26 +277,34 @@ int  render_confirm_hit(float x, float y);
 
 /* Settings page (2026-09-15; the brightness row left the milestones page
  * for it): BRIGHTNESS 30 / 60 / 100 % and VOLUME OFF / QUIET / NORMAL as
- * segment buttons - tap the one you want - then LIGHTS OUT MANUAL / AUTO
- * (the keeper's double-tap on the glass - the default - or the idle rule)
- * with the idle time
- * under it as one number (swipe it up or down to step the seconds, or tap
- * its chevrons; LIGHT_IDLE_S shows by default), and a CLOSE button bottom
- * right (back to the milestones page, 2026-09-16 - the platform's job).
+ * segment buttons - tap the one you want - then LIGHTS OUT, one row since
+ * 0.3.2 (Strato: "takes up too much real estate ... condense it and give a
+ * few options"): a value between two arrows, DOUBLE-TAP (MANUAL, the default:
+ * the keeper's double-tap on the glass) and then AUTO after 5 SEC .. 30 MIN
+ * still (LIGHT_IDLE_CHOICES); a tap on the row's left half steps back, on its
+ * right half forward. Under it AUTO FEED ON / OFF (tank_t.autofeed_off) and,
+ * on a tank that turns its picture over by itself, ROTATION: one button, an
+ * open padlock in a turning arrow while the picture follows the tank, a shut
+ * one once the keeper locks the way up (tank_orient_lock). A CLOSE button
+ * bottom right (back to the milestones page, 2026-09-16 - the platform's job).
  * The platform feeds render_settings_touch EVERY FRAME while the page is up
- * (x, y, finger down), as it feeds setup_touch: it classifies taps and the
- * wheel's drags, applies the light settings to the tank itself (and marks
- * the save), and returns what happened: SET_TAP_BRIGHT with *value = the
- * percent, SET_TAP_VOLUME 0..2 (those two are the platform's to apply),
- * SET_TAP_LIGHT (*value 1 = AUTO, the idle rule; 0 = MANUAL, the double-tap),
- * SET_TAP_IDLE (*value = the seconds now set), SET_TAP_CLOSE, or nothing.
- * A worn tank (TANK_WORN, the watch) has a fourth row, SCREEN NORMAL /
- * TURNED (tank_screen_*), applied here like the light's.
+ * (x, y, finger down), as it feeds setup_touch: it classifies the taps,
+ * applies the tank's own settings to the tank itself (and marks the save),
+ * and returns what happened: SET_TAP_BRIGHT with *value = the percent,
+ * SET_TAP_VOLUME 0..2 (those two are the platform's to apply),
+ * SET_TAP_LIGHT (the row stepped to or from MANUAL: *value 1 = AUTO),
+ * SET_TAP_IDLE (AUTO's time stepped: *value = the seconds now set),
+ * SET_TAP_FEED (*value 1 = AUTO FEED on), SET_TAP_ROTATE (*value 1 =
+ * locked), SET_TAP_CLOSE, or nothing.
+ * A worn tank (TANK_WORN, the watch) has SCREEN NORMAL / TURNED
+ * (tank_screen_*) where the others have ROTATION, applied here like the light's.
  * render_settings_tap is the bare hit test (tests). */
 enum { SET_TAP_NONE = 0, SET_TAP_CLOSE = 1, SET_TAP_BRIGHT = 2, SET_TAP_VOLUME = 3, SET_TAP_LIGHT = 4, SET_TAP_IDLE = 5,
        SET_TAP_UPDATES = 6,     /* the UPDATES button, bottom left (2026-09-30): the platform opens the updates page (update.h) */
-       SET_TAP_SCREEN = 7 };    /* a worn tank's SCREEN row (2026-10-02): *value 1 = TURNED, already applied and marked
+       SET_TAP_SCREEN = 7,      /* a worn tank's SCREEN row (2026-10-02): *value 1 = TURNED, already applied and marked
                                    for the save - the platform only logs it (the picture turns on the next frame) */
+       SET_TAP_FEED = 8,        /* AUTO FEED (0.3.2): *value 1 = ON; applied and marked for the save */
+       SET_TAP_ROTATE = 9 };    /* ROTATION (0.3.2): *value 1 = locked; applied and marked for the save */
 void render_settings(const tank_t *t, uint16_t *fb, int stride, int bright_pct, int volume);
 int  render_settings_tap(float x, float y, int *value);
 int  render_settings_touch(tank_t *t, float x, float y, bool down, int *value);
@@ -442,17 +450,18 @@ void render_fish_portrait(uint16_t *fb, int stride, float x, float y, float size
 #define SHP_ARROW_X1 (PAGE_W - (PAGE_BOWL ? 66 : 28) - SHP_ARROW_W)   /* next (further in on the bowl) */
 #define SHP_ARROW_X0 (SHP_ARROW_X1 - SHP_ARROW_W - 8)     /* previous */
 /* the settings page */
-#if TANK_WORN                        /* the watch (2026-10-02): a fourth row, SCREEN, so the page uses the glass above
-                                        and below the PAGE box (page y -67..435 is on the glass; the round corners
-                                        take the ends of the first and last 100 px): the title above the box, the
-                                        rows up by 44, SCREEN under the seconds and the foot's pair centred under it */
+#if TANK_WORN                        /* the watch (2026-10-02): the page uses the glass above and below the PAGE
+                                        box (page y -67..435 is on the glass; the round corners take the ends of
+                                        the first and last 100 px): the title above the box, the rows up by 44,
+                                        the foot's pair centred under them */
 #define SET_TITLE_Y   (-40)
 #define SET_ROW1_Y    14
 #define SET_ROW2_Y    64
 #define SET_NOTE_Y    102
-#define SET_ROW3_Y    132
-#define SET_ROW4_Y    316            /* SCREEN: NORMAL / TURNED */
-#define SET_NOTE4_Y   358            /* under it: who it is for */
+#define SET_ROW3_Y    132            /* LIGHTS OUT */
+#define SET_ROW4_Y    188            /* AUTO FEED */
+#define SET_ROW5_Y    244            /* SCREEN: NORMAL / TURNED */
+#define SET_NOTE5_Y   286            /* under it: who it is for */
 #define SET_FOOT_Y    392            /* UPDATES and CLOSE */
 #else
 #define SET_TITLE_Y   14
@@ -460,6 +469,8 @@ void render_fish_portrait(uint16_t *fb, int stride, float x, float y, float size
 #define SET_ROW2_Y    108            /* VOLUME */
 #define SET_NOTE_Y    146            /* "FISH ARE QUIET AT NIGHT" */
 #define SET_ROW3_Y    176            /* LIGHTS OUT */
+#define SET_ROW4_Y    222            /* AUTO FEED */
+#define SET_ROW5_Y    268            /* ROTATION */
 #define SET_FOOT_Y    MSP_CLOSE_Y    /* UPDATES and CLOSE: the milestones page's foot */
 #endif
 #define SET_LABEL_X   32
@@ -469,30 +480,20 @@ void render_fish_portrait(uint16_t *fb, int stride, float x, float y, float size
 #define SET_SEG_DX    (PAGE_NARROW || PAGE_BOWL ? 80 : 82)
 #define SET_SEG_H     40
 #define SET_SEG_Y(row) ((row) - 10)  /* the segment sits on the label's line */
-/* the seconds selector: ONE number in the 4x font (28 px tall), chevrons
- * above and below; a swipe up or down anywhere on it steps the whole value
- * (2026-09-15 evening, Strato: "18, 17 ... 10, then 9 - not 19"; the first
- * cut was three letter-wheel digits). Clamped live to LIGHT_IDLE_MIN_S ..
- * LIGHT_IDLE_MAX_S. Sits well clear of the LIGHTS OUT segments: a finger
- * aiming at the up chevron used to land on MANUAL. */
-#define SET_NUM_SCALE 4
-#define SET_NUM_H     (7 * SET_NUM_SCALE)
-#define SET_NUM_X     SET_SEG_X       /* the number's left edge (right-aligned in a 3-digit box) */
-#define SET_NUM_BOX_W (3 * 6 * SET_NUM_SCALE - SET_NUM_SCALE)
-#define SET_NUM_Y     (SET_ROW3_Y + 90)
-#define SET_NUM_GAP   30              /* chevron tip to the number */
-#define SET_AFTER_Y   (SET_NUM_Y + (SET_NUM_H - 14) / 2)
-#define SET_STEP_PX   15              /* drag travel per step */
-#define SET_LIGHT_BAND_END (SET_SEG_Y(SET_ROW3_Y) + SET_SEG_H + 8)   /* the segments' band stops just under them */
+/* LIGHTS OUT (0.3.2): one value between two arrow buttons, across the three
+ * segments' span - the row's left half steps back, its right half forward */
+#define SET_ARW_W     40
+#define SET_SPAN_W    (2 * SET_SEG_DX + SET_SEG_W)
+#define SET_SPAN_MID  (SET_SEG_X + SET_SPAN_W / 2)
+/* ROTATION: one icon button where the first segment stands, its word beside it */
+#define SET_ROT_WORD_X (SET_SEG_X + SET_SEG_W + 14)
 #define SET_UPD_W     112
 #if TANK_WORN                        /* the watch: UPDATES 114..226 and CLOSE 242..334, clear of the lower corners */
 #define SET_UPD_X     114
 #undef  SET_CLOSE_X
 #define SET_CLOSE_X   242
-#define SET_NUM_END   (SET_SEG_Y(SET_ROW4_Y) - 12)   /* the seconds' band stops at the SCREEN row's */
 #else
 #define SET_UPD_X     (PAGE_BOWL ? 60 : 32)    /* the UPDATES button, bottom left (2026-09-30); in from the glass on the bowl */
-#define SET_NUM_END   PAGE_H                   /* the seconds' band runs down to the bezel */
 #endif
 
 #endif

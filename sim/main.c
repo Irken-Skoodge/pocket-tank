@@ -126,10 +126,10 @@ static int ms_tap(float px, float py) { return render_milestones_tap(&tank, PG_X
 #define SHOP_PREV_X    (SHP_ARROW_X0 + SHP_ARROW_W / 2)
 #define SHOP_NEXT_X    (SHP_ARROW_X1 + SHP_ARROW_W / 2)
 static int shop_tap(float px, float py) { return render_shop_tap(&tank, PG_X(px), PG_Y(py)); }
-/* the settings page: segment i of a row's buttons, the seconds' number (its chevrons a gap above and below) */
+/* the settings page: segment i of a row's buttons, the LIGHTS OUT row's two arrows */
 #define SETP_SEG_X(i)  (SET_SEG_X + (i) * SET_SEG_DX + SET_SEG_W / 2)
-#define SETP_NUM_X     (SET_NUM_X + SET_NUM_BOX_W / 2)
-#define SETP_NUM_Y     (SET_NUM_Y + SET_NUM_H / 2)
+#define SETP_PREV_X    (SET_SEG_X + SET_ARW_W / 2)
+#define SETP_NEXT_X    (SET_SEG_X + SET_SPAN_W - SET_ARW_W / 2)
 /* the setup / birth / placement pages (setup.h's numbers are the page's) */
 static int  pg_hit(float px, float py) { return setup_hit(PG_X(px), PG_Y(py)); }
 static void pg_touch(float px, float py, bool down) { setup_touch(&tank, PG_X(px), PG_Y(py), down); }
@@ -868,10 +868,10 @@ static int selftest_sleep(void) {
             if (tank.night) { printf("FAIL: hold_light did not hold the light\n"); return 1; }
             tank.hold_light = false; tank.light_auto = false;
         }
-        /* the settings page (2026-09-15): LIGHTS OUT OFF keeps the light on
-           however still; ON brings the idle rule back; the seconds wheel
-           spins a digit per SET_SPIN_PX of travel, the chevrons one step,
-           and a value under LIGHT_IDLE_MIN_S settles to it at the release */
+        /* the settings page (2026-09-15; one LIGHTS OUT row since 0.3.2):
+           DOUBLE-TAP (MANUAL) keeps the light on however still; a step to
+           the right is AUTO, the idle rule, after 5 SEC .. 30 MIN; the row's
+           left half steps back. Then AUTO FEED and ROTATION (SCREEN on the watch) */
         {
             static uint16_t sfb[TANK_W * TANK_H];
             int v = 0, r;
@@ -879,8 +879,8 @@ static int selftest_sleep(void) {
             #define SET_TAP_AT(X, Y) (SET_TOUCH(X, Y, true), SET_TOUCH(X, Y, false))
             const int light_y = SET_ROW3_Y + 10;                             /* on the LIGHTS OUT segments */
             if (tank.light_idle_s != LIGHT_IDLE_S || tank.light_auto) { printf("FAIL: light settings not at the default (%d s, auto %d)\n", tank.light_idle_s, tank.light_auto); return 1; }
-            r = SET_TAP_AT(SETP_SEG_X(0), light_y);                           /* LIGHTS OUT: MANUAL (the first segment, already the default) */
-            if (r != SET_TAP_LIGHT || v != 0 || tank.light_auto) { printf("FAIL: LIGHTS OUT MANUAL tap -> %d/%d, auto %d\n", r, v, tank.light_auto); return 1; }
+            r = SET_TAP_AT(SETP_PREV_X, light_y);                             /* LIGHTS OUT: already at the first choice, the double-tap */
+            if (r != SET_TAP_NONE || tank.light_auto || tank_light_choice(&tank) != 0) { printf("FAIL: back from the first LIGHTS OUT choice -> %d, auto %d\n", r, tank.light_auto); return 1; }
             for (int i = 0; i < 30 * 60; i++) tank_tick(&tank, 1.0f / 60.0f, advisor_rules);
             if (tank.night) { printf("FAIL: lights went out in MANUAL\n"); return 1; }
             render_settings(&tank, sfb, TANK_W, 60, 2);
@@ -911,61 +911,91 @@ static int selftest_sleep(void) {
             for (int i = 0; i < 3; i++) tank_touch_tap(&tank, 200, 200);         /* three taps = a startle, not a toggle */
             for (int i = 0; i < 60; i++) tank_tick(&tank, 1.0f / 60.0f, advisor_rules);
             if (tank.night) { printf("FAIL: a triple tap toggled the light\n"); return 1; }
-            r = SET_TAP_AT(SETP_SEG_X(1), light_y);                           /* AUTO: the second segment */
-            if (r != SET_TAP_LIGHT || v != 1 || !tank.light_auto || tank.light_manual_off) { printf("FAIL: LIGHTS OUT AUTO tap -> %d/%d\n", r, v); return 1; }
+            r = SET_TAP_AT(SETP_NEXT_X, light_y);                             /* one step on: AUTO, after the shortest time */
+            if (r != SET_TAP_LIGHT || v != 1 || !tank.light_auto || tank.light_manual_off || tank.light_idle_s != 5) { printf("FAIL: LIGHTS OUT's first step -> %d/%d, %d s\n", r, v, tank.light_idle_s); return 1; }
             tank_touch_tap(&tank, 200, 200); tank_touch_tap(&tank, 200, 200);   /* in AUTO a double-tap is nothing */
             for (int i = 0; i < 60; i++) tank_tick(&tank, 1.0f / 60.0f, advisor_rules);
             if (tank.night || tank.light_manual_off) { printf("FAIL: a double-tap in AUTO touched the light\n"); return 1; }
-            r = SET_TAP_AT(SETP_NUM_X, SET_NUM_Y - SET_NUM_GAP - 2);           /* the up chevron: 15 -> 16 */
-            if (r != SET_TAP_IDLE || tank.light_idle_s != 16) { printf("FAIL: up chevron -> %d, %d s\n", r, tank.light_idle_s); return 1; }
-            r = SET_TAP_AT(SETP_NUM_X, light_y + SET_SEG_H + 10);             /* just under the LIGHTS OUT buttons is the number's, not MANUAL's */
-            if (r != SET_TAP_IDLE || tank.light_idle_s != 17 || !tank.light_auto) { printf("FAIL: the band under the segments -> %d, %d s, auto %d\n", r, tank.light_idle_s, tank.light_auto); return 1; }
-            SET_TOUCH(SETP_NUM_X, SETP_NUM_Y, true);                           /* press the number, swipe up 3 steps: 17 -> 20 */
-            for (int k = 1; k <= 30; k++) SET_TOUCH(SETP_NUM_X, SETP_NUM_Y - k * 3 * SET_STEP_PX / 30.0f - 0.5f, true);
-            r = SET_TOUCH(SETP_NUM_X, SETP_NUM_Y - 3 * SET_STEP_PX - 1, false);
-            if (r != SET_TAP_IDLE || v != 20 || tank.light_idle_s != 20) { printf("FAIL: swipe up -> %d, %d s\n", r, tank.light_idle_s); return 1; }
-            SET_TOUCH(SETP_NUM_X, SETP_NUM_Y, true);                           /* and down 11 steps: 20 -> 9, straight through 10 */
-            for (int k = 1; k <= 55; k++) SET_TOUCH(SETP_NUM_X, SETP_NUM_Y + k * 11 * SET_STEP_PX / 55.0f + 0.5f, true);
-            r = SET_TOUCH(SETP_NUM_X, SETP_NUM_Y + 11 * SET_STEP_PX + 1, false);
-            if (r != SET_TAP_IDLE || tank.light_idle_s != 9) { printf("FAIL: swipe down -> %d, %d s (want 9)\n", r, tank.light_idle_s); return 1; }
-            for (int i = 0; i < 6; i++) SET_TAP_AT(SETP_NUM_X, SET_NUM_Y + SET_NUM_H + SET_NUM_GAP + 8);   /* the down chevron x6: 9 -> 5, held at the floor */
-            if (tank.light_idle_s != LIGHT_IDLE_MIN_S) { printf("FAIL: the floor: %d s\n", tank.light_idle_s); return 1; }
-            tank.light_idle_s = 20; tank_handled(&tank);
-            for (int i = 0; i < 18 * 60; i++) tank_tick(&tank, 1.0f / 60.0f, advisor_rules);
-            if (tank.night) { printf("FAIL: dark at 18 s with 20 s set\n"); return 1; }
+            r = SET_TAP_AT(SETP_NEXT_X, light_y);                             /* 5 -> 15 */
+            if (r != SET_TAP_IDLE || v != 15 || tank.light_idle_s != 15) { printf("FAIL: the next choice -> %d, %d s\n", r, tank.light_idle_s); return 1; }
+            { static const int want[] = { 30, 60, 180, 300, 600, 1800 };   /* Strato's list, to its end */
+              for (int k = 0; k < 6; k++) { r = SET_TAP_AT(SETP_SEG_X(2), light_y);   /* (anywhere on the row's right half) */
+                  if (r != SET_TAP_IDLE || tank.light_idle_s != want[k]) { printf("FAIL: LIGHTS OUT choice %d -> %d, %d s (want %d)\n", k + 3, r, tank.light_idle_s, want[k]); return 1; } } }
+            r = SET_TAP_AT(SETP_NEXT_X, light_y);                             /* the end of the list holds */
+            if (r != SET_TAP_NONE || tank.light_idle_s != 1800) { printf("FAIL: past the last LIGHTS OUT choice -> %d, %d s\n", r, tank.light_idle_s); return 1; }
+            render_settings(&tank, sfb, TANK_W, 60, 2);
+            for (int k = 0; k < 5; k++) r = SET_TAP_AT(SETP_PREV_X, light_y);  /* back to 30 SEC */
+            if (r != SET_TAP_IDLE || tank.light_idle_s != 30) { printf("FAIL: back five choices -> %d, %d s\n", r, tank.light_idle_s); return 1; }
+            tank_handled(&tank);
+            for (int i = 0; i < 28 * 60; i++) tank_tick(&tank, 1.0f / 60.0f, advisor_rules);
+            if (tank.night) { printf("FAIL: dark at 28 s with 30 s set\n"); return 1; }
             for (int i = 0; i < 3 * 60; i++) tank_tick(&tank, 1.0f / 60.0f, advisor_rules);
-            if (!tank.night) { printf("FAIL: lit at 21 s with 20 s set\n"); return 1; }
+            if (!tank.night) { printf("FAIL: lit at 31 s with 30 s set\n"); return 1; }
+            tank.light_idle_s = 20;                                            /* a save from the wheel's days: honoured, shown as the nearest choice */
+            if (tank_light_choice(&tank) != 2) { printf("FAIL: 20 s reads as choice %d (want 15 SEC)\n", tank_light_choice(&tank)); return 1; }
+            r = SET_TAP_AT(SETP_NEXT_X, light_y);
+            if (r != SET_TAP_IDLE || tank.light_idle_s != 30) { printf("FAIL: a step from a wheel-era 20 s -> %d s\n", tank.light_idle_s); return 1; }
+            for (int k = 0; k < 3; k++) r = SET_TAP_AT(SETP_PREV_X, light_y);  /* 15, 5, and back to the double-tap */
+            if (r != SET_TAP_LIGHT || v != 0 || tank.light_auto) { printf("FAIL: back to the double-tap -> %d/%d\n", r, v); return 1; }
+            tank_light_choice_set(&tank, 3);                                   /* 30 SEC, for the save below */
+            /* AUTO FEED (0.3.2): ON by default, OFF and back */
+            {
+                const int feed_y = SET_ROW4_Y + 10;
+                if (tank.autofeed_off) { printf("FAIL: AUTO FEED not ON at the start\n"); return 1; }
+                r = SET_TAP_AT(SETP_SEG_X(1), feed_y);
+                if (r != SET_TAP_FEED || v != 0 || !tank.autofeed_off) { printf("FAIL: AUTO FEED OFF -> %d/%d\n", r, v); return 1; }
+                r = SET_TAP_AT(SETP_SEG_X(0), feed_y);
+                if (r != SET_TAP_FEED || v != 1 || tank.autofeed_off) { printf("FAIL: AUTO FEED ON -> %d/%d\n", r, v); return 1; }
+                r = SET_TAP_AT(SETP_SEG_X(1), feed_y);                               /* OFF, for the save below */
+                render_settings(&tank, sfb, TANK_W, 60, 2);
+            }
 #if TANK_WORN
             /* SCREEN (the watch, 2026-10-02): NORMAL by default, the toggle
-               turns the picture and back, the seconds' chevron above it is
-               still the seconds', and the choice rides in the save */
+               turns the picture and back, and the choice rides in the save */
             {
-                const int scr_y = SET_ROW4_Y + 10;
+                const int scr_y = SET_ROW5_Y + 10;
                 if (tank_screen_turned(&tank)) { printf("FAIL: SCREEN not NORMAL at the start\n"); return 1; }
                 r = SET_TAP_AT(SETP_SEG_X(1), scr_y);                                /* TURNED */
                 if (r != SET_TAP_SCREEN || v != 1 || !tank_screen_turned(&tank)) { printf("FAIL: SCREEN TURNED -> %d/%d\n", r, v); return 1; }
                 r = SET_TAP_AT(SETP_SEG_X(0), scr_y);                                /* NORMAL */
                 if (r != SET_TAP_SCREEN || v != 0 || tank_screen_turned(&tank)) { printf("FAIL: SCREEN NORMAL -> %d/%d\n", r, v); return 1; }
                 r = SET_TAP_AT(SETP_SEG_X(1), scr_y);
-                r = SET_TAP_AT(SETP_NUM_X, SET_NUM_Y + SET_NUM_H + SET_NUM_GAP + 8);     /* the seconds' down chevron is still the seconds' */
-                if (r != SET_TAP_IDLE) { printf("FAIL: the down chevron over the SCREEN row -> %d\n", r); return 1; }
-                tank.light_idle_s = 20;
                 render_settings(&tank, sfb, TANK_W, 60, 2);
                 progression_save(&tank); tank_init(&tank, 8); progression_boot(&tank);
                 if (!tank_screen_turned(&tank)) { printf("FAIL: SCREEN TURNED did not survive the save\n"); return 1; }
                 tank_screen_set(&tank, false);
-                printf("selftest-sleep: SCREEN: NORMAL by default, TURNED and back, the chevron above it its own, saved\n");
+                printf("selftest-sleep: SCREEN: NORMAL by default, TURNED and back, saved\n");
             }
 #else
             tank_screen_set(&tank, true);
             if (tank_screen_turned(&tank)) { printf("FAIL: a desk tank's screen turned by the setting\n"); return 1; }
+            /* ROTATION (0.3.2): the picture follows the tank's flip until the
+               keeper locks it - then it keeps the way up it had, through a
+               save, until it is unlocked */
+            {
+                const int rot_y = SET_ROW5_Y + 10;
+                if (tank.orient_lock || tank_orient(&tank, false) || !tank_orient(&tank, true)) { printf("FAIL: the picture does not follow the tank by default\n"); return 1; }
+                r = SET_TAP_AT(SETP_SEG_X(0), rot_y);                                /* locked, while turned over */
+                if (r != SET_TAP_ROTATE || v != 1 || !tank.orient_lock) { printf("FAIL: ROTATION lock -> %d/%d\n", r, v); return 1; }
+                if (!tank_orient(&tank, false) || !tank_orient(&tank, true)) { printf("FAIL: a locked picture turned with the tank\n"); return 1; }
+                render_settings(&tank, sfb, TANK_W, 60, 2);
+                progression_save(&tank); tank_init(&tank, 8); progression_boot(&tank);
+                if (!tank.orient_lock || !tank_orient(&tank, false)) { printf("FAIL: the locked way up did not survive the save\n"); return 1; }
+                r = SET_TAP_AT(SET_ROT_WORD_X + 20, rot_y);                          /* its word is the button too: unlocked */
+                if (r != SET_TAP_ROTATE || v != 0 || tank.orient_lock || tank_orient(&tank, false)) { printf("FAIL: ROTATION unlock -> %d/%d\n", r, v); return 1; }
+                r = SET_TAP_AT(SETP_SEG_X(0), rot_y);                                /* locked upright this time */
+                if (!tank.orient_lock || tank_orient(&tank, true)) { printf("FAIL: a picture locked upright turned over\n"); return 1; }
+                r = SET_TAP_AT(SETP_SEG_X(0), rot_y);
+                printf("selftest-sleep: ROTATION: follows the tank by default, locks the way up it has (either way), saved, unlocks\n");
+            }
 #endif
             r = SET_TAP_AT(SET_CLOSE_X + 40, SET_FOOT_Y + 10);
             if (r != SET_TAP_CLOSE) { printf("FAIL: CLOSE -> %d\n", r); return 1; }
             progression_save(&tank); tank_init(&tank, 8); progression_boot(&tank);
-            if (tank.light_idle_s != 20 || !tank.light_auto) { printf("FAIL: light settings did not survive the save (%d s)\n", tank.light_idle_s); return 1; }
-            tank.light_idle_s = LIGHT_IDLE_S; tank.light_auto = false;
-            printf("selftest-sleep: settings: LIGHTS OUT manual (double-tap, saved) / auto, the seconds (chevrons, swipes through 10, the floor, the band under the buttons), 20 s honoured, saved\n");
+            if (tank.light_idle_s != 30 || !tank.light_auto) { printf("FAIL: light settings did not survive the save (%d s)\n", tank.light_idle_s); return 1; }
+            if (!tank.autofeed_off) { printf("FAIL: AUTO FEED OFF did not survive the save\n"); return 1; }
+            tank.light_idle_s = LIGHT_IDLE_S; tank.light_auto = false; tank.autofeed_off = false;
+            printf("selftest-sleep: settings: LIGHTS OUT one row (the double-tap, saved / 5 SEC .. 30 MIN, both ends hold, a wheel-era 20 s), 30 s honoured, AUTO FEED, saved\n");
             #undef SET_TAP_AT
             #undef SET_TOUCH
         }
@@ -1228,8 +1258,9 @@ static int selftest_update(void) {
     { int v = 0, r;
       render_settings_touch(&tank, PG_X(SET_UPD_X + 40), PG_Y(SET_FOOT_Y + 12), true, &v); r = render_settings_touch(&tank, PG_X(SET_UPD_X + 40), PG_Y(SET_FOOT_Y + 12), false, &v);
       EXPECT(r == SET_TAP_UPDATES, "settings: the UPDATES button -> %d", r);
-      render_settings_touch(&tank, PG_X(SETP_NUM_X), PG_Y(SET_NUM_Y + SET_NUM_H + SET_NUM_GAP + 8), true, &v); r = render_settings_touch(&tank, PG_X(SETP_NUM_X), PG_Y(SET_NUM_Y + SET_NUM_H + SET_NUM_GAP + 8), false, &v);
-      EXPECT(r != SET_TAP_UPDATES && r != SET_TAP_CLOSE, "settings: the seconds' down chevron read as a button (%d)", r);
+      render_settings_touch(&tank, PG_X(SETP_SEG_X(0)), PG_Y(SET_ROW5_Y + 10), true, &v); r = render_settings_touch(&tank, PG_X(SETP_SEG_X(0)), PG_Y(SET_ROW5_Y + 10), false, &v);
+      EXPECT(r != SET_TAP_UPDATES && r != SET_TAP_CLOSE, "settings: the last row read as a foot button (%d)", r);
+      render_settings_touch(&tank, PG_X(SETP_SEG_X(0)), PG_Y(SET_ROW5_Y + 10), true, &v); render_settings_touch(&tank, PG_X(SETP_SEG_X(0)), PG_Y(SET_ROW5_Y + 10), false, &v);   /* (and back) */
       EXPECT(updates_page_tap(PG_X(UPD_CLOSE_X + 40), PG_Y(UPD_CLOSE_Y + 12)) == UPD_TAP_CLOSE, "updates page: CLOSE");
       EXPECT(updates_page_tap(PG_X(UPD_CHECK_X + UPD_CHECK_W / 2), PG_Y(UPD_CHECK_Y + 20)) == UPD_TAP_CHECK, "updates page: CHECK");
       const float fx = PG_X(UPD_FORGET_X + UPD_FORGET_W / 2), fy = PG_Y(UPD_FORGET_Y + 16);
@@ -2310,10 +2341,12 @@ static int snapshot(const char *prefix, int seconds) {
         render_milestones_leave();
         tank.sd_unlocks = unl; tank.tank_ms_bits = tms; tank.tank_ms_seen = seen;
     }
-    render_settings(&tank, fb, TANK_W, 60, 2);                     /* MANUAL, the default */
+    render_settings(&tank, fb, TANK_W, 60, 2);                     /* the defaults: the double-tap, AUTO FEED on, the picture free to turn */
     snprintf(path, sizeof path, "%s_settings.ppm", prefix); write_ppm(path, fb);
-    tank.light_auto = true; render_settings(&tank, fb, TANK_W, 60, 2);   /* AUTO: the seconds */
-    snprintf(path, sizeof path, "%s_settings_auto.ppm", prefix); write_ppm(path, fb); tank.light_auto = false;
+    tank_light_choice_set(&tank, 5); tank.autofeed_off = true; tank_orient_lock(&tank, true);
+    render_settings(&tank, fb, TANK_W, 60, 2);                     /* AUTO after 3 MIN, AUTO FEED off, the way up locked */
+    snprintf(path, sizeof path, "%s_settings_auto.ppm", prefix); write_ppm(path, fb);
+    tank_light_choice_set(&tank, 0); tank.autofeed_off = false; tank_orient_lock(&tank, false);
     {   /* the UPDATES page and update mode's pages (2026-09-30), over the pretend radio */
         setenv("POCKET_TANK_WIFI", "/tmp/pocket-tank-snapshot-wifi.txt", 1); net_port_creds_forget();
         render_updates_page(fb, TANK_W);
@@ -2619,6 +2652,23 @@ static int snapshot(const char *prefix, int seconds) {
         snprintf(path, sizeof path, "%s_cluster_front.ppm", prefix); write_ppm(path, fb);
         tank_decor_set(&tank, 4, 330, DECOR_Z_BACK); tank_cluster_set_scheme(&tank, 2); render_tank(&tank, fb, TANK_W); render_tank(&tank, fb, TANK_W);
         snprintf(path, sizeof path, "%s_cluster_behind.ppm", prefix); write_ppm(path, fb);
+        {   /* the snail and the cluster (0.3.2): walking the floor past it, and on the glass over it */
+            uint32_t unl = tank.sd_unlocks; float sx = tank.snail_x, sy = tank.snail_y, sh = tank.snail_heading; int sc = tank.snail_cell;
+            tank.sd_unlocks |= SD_ITEM_SNAIL; tank.snail_cell = -1; tank.snail_heading = 0;
+            for (int z = 0; z < 2; z++) {
+                tank_decor_set(&tank, 4, 330, z ? DECOR_Z_FRONT : DECOR_Z_BACK);
+                tank.snail_x = 336; tank.snail_y = SNAIL_FLOOR_Y; tank.snail_front = false;   /* at its foot, in its back lane */
+                render_tank(&tank, fb, TANK_W); render_tank(&tank, fb, TANK_W);
+                snprintf(path, sizeof path, "%s_cluster_snail_%s.ppm", prefix, z ? "front" : "behind"); write_ppm(path, fb);
+                tank.snail_front = true;                                             /* ... and in its front lane: over a piece IN FRONT */
+                render_tank(&tank, fb, TANK_W); render_tank(&tank, fb, TANK_W);
+                snprintf(path, sizeof path, "%s_cluster_snail_%s_lane.ppm", prefix, z ? "front" : "behind"); write_ppm(path, fb);
+                tank.snail_x = 330; tank.snail_y = SNAIL_FLOOR_Y - 40;
+                render_tank(&tank, fb, TANK_W); render_tank(&tank, fb, TANK_W);
+                snprintf(path, sizeof path, "%s_cluster_snail_glass_%s.ppm", prefix, z ? "front" : "behind"); write_ppm(path, fb);
+            }
+            tank.sd_unlocks = unl; tank.snail_x = sx; tank.snail_y = sy; tank.snail_heading = sh; tank.snail_cell = (int16_t)sc;
+        }
         tank_decor_set(&tank, 4, 330, DECOR_Z_FRONT); tank_cluster_set_scheme(&tank, 0); setup_begin_place(&tank, 4);
         render_tank(&tank, fb, TANK_W); render_setup(&tank, fb, TANK_W, 1.0f);
         snprintf(path, sizeof path, "%s_place_cluster.ppm", prefix); write_ppm(path, fb);
@@ -3669,7 +3719,62 @@ static int selftest_hunger(void) {
     int idx = 0; for (int k = 0; k < tank.n_fish; k++) if (tank.fish[k].hunger < tank.fish[idx].hunger) idx = k;
     for (int i = 0; i < (int)(4 * 60 / dt); i++) { tank_tick(&tank, dt, advisor_rules); progression_tick(&tank, dt); }
     if (tank.fish[idx].hunger >= 7) { printf("FAIL: %s hungry again (%.1f) 4 min after a meal\n", tank.fish[idx].name, tank.fish[idx].hunger); return 1; }
-    printf("hunger: %s still %.1f four minutes on. selftest-hunger ok\n", tank.fish[idx].name, tank.fish[idx].hunger);
+    printf("hunger: %s still %.1f four minutes on\n", tank.fish[idx].name, tank.fish[idx].hunger);
+    /* AUTO FEED off (0.3.2): the tank drops nothing, ever. The school goes
+       hungry and begs; nobody comes, so they give up begging (no pellets
+       fall for it) and go about hungry; a starving fish in a lit tank
+       loses trust, slowly, to a floor - none in the dark - and the
+       keeper's pellets stop the loss. Back ON, the trickle is back. */
+    setenv("POCKET_TANK_SAVE", "/tmp/pocket-tank-selftest-hunger.sav", 1); remove(getenv("POCKET_TANK_SAVE"));   /* never the real save */
+    tank_init(&tank, 99); progression_boot(&tank);                                 /* progression runs the begging and the trust: a fresh pair */
+    tank.autofeed_off = true;
+    for (int k = 0; k < tank.n_fish; k++) tank.fish[k].trust = 6.0f;
+    int fell = 0, rav = 0, rav_last = 0;
+    live_prev = 0; for (int k = 0; k < MAX_FOOD; k++) live_prev += tank.food[k].alive;   /* (a new tank's first two pellets are not the trickle's) */
+    for (int i = 0; i < (int)(60 * 60 / dt); i++) {
+        tank_tick(&tank, dt, advisor_rules); progression_tick(&tank, dt);
+        int live = 0; for (int k = 0; k < MAX_FOOD; k++) live += tank.food[k].alive;
+        if (live > live_prev) fell += live - live_prev;
+        live_prev = live;
+        if (tank.ravenous) { rav++; rav_last = i; }
+    }
+    float tmax = 0, hlow = 10;
+    for (int k = 0; k < tank.n_fish; k++) { if (tank.fish[k].trust > tmax) tmax = tank.fish[k].trust; if (tank.fish[k].hunger < hlow) hlow = tank.fish[k].hunger; }
+    printf("hunger: AUTO FEED off, an hour lit: %d pellets fell, least hungry %.1f, begged %.0f s (last at %.0f min), most trust left %.2f\n",
+           fell, hlow, rav * dt, rav_last * dt / 60, tmax);
+    if (fell) { printf("FAIL: the tank fed itself with AUTO FEED off\n"); return 1; }
+    if (hlow < 8.5f) { printf("FAIL: an unfed school is not starving after an hour (%.1f)\n", hlow); return 1; }
+    if (!rav || tank.ravenous) { printf("FAIL: with AUTO FEED off the school %s\n", rav ? "never stops begging" : "never begged"); return 1; }
+    if (tmax >= 5.9f) { printf("FAIL: starving cost no trust (%.2f)\n", tmax); return 1; }
+    for (int i = 0; i < (int)(3 * 60 * 60 / dt); i++) { tank_tick(&tank, dt, advisor_rules); progression_tick(&tank, dt); }
+    for (int k = 0; k < tank.n_fish; k++)
+        if (tank.fish[k].trust < 2.0f - 0.001f || tank.fish[k].trust > 2.0f + 0.001f) { printf("FAIL: %s's trust %.2f after hours of starving (the floor is 2.0)\n", tank.fish[k].name, tank.fish[k].trust); return 1; }
+    for (int k = 0; k < tank.n_fish; k++) tank.fish[k].trust = 6.0f;
+    tank_toggle_light(&tank);                                                      /* dark (the first toggle of a lit tank): the fish rest, nothing is lost */
+    for (int i = 0; i < (int)(30 * 60 / dt); i++) { tank_tick(&tank, dt, advisor_rules); progression_tick(&tank, dt); }
+    for (int k = 0; k < tank.n_fish; k++) if (tank.fish[k].trust < 5.999f) { printf("FAIL: trust lost in the dark (%.2f)\n", tank.fish[k].trust); return 1; }
+    tank_light_auto(&tank);
+    for (int n = 0; n < 6; n++) {                                                   /* the keeper feeds, generously */
+        tank_feed(&tank, 120 + n * 40, 3);
+        for (int i = 0; i < (int)(40 / dt); i++) { tank_tick(&tank, dt, advisor_rules); progression_tick(&tank, dt); }
+    }
+    float t0[N_FISH_MAX]; int fed = 0;
+    for (int k = 0; k < tank.n_fish; k++) { t0[k] = tank.fish[k].trust; fed += tank.fish[k].hunger < 8.5f; }
+    for (int i = 0; i < (int)(60 / dt); i++) { tank_tick(&tank, dt, advisor_rules); progression_tick(&tank, dt); }
+    for (int k = 0; k < tank.n_fish; k++)
+        if (tank.fish[k].hunger < 8.0f && tank.fish[k].trust < t0[k] - 0.001f) { printf("FAIL: a fed fish still loses trust\n"); return 1; }
+    if (!fed) { printf("FAIL: the keeper's pellets fed nobody\n"); return 1; }
+    tank.autofeed_off = false; fell = 0; live_prev = 0;
+    for (int k = 0; k < tank.n_fish; k++) tank.fish[k].hunger = 8.0f;
+    for (int i = 0; i < (int)(5 * 60 / dt); i++) {
+        tank_tick(&tank, dt, advisor_rules); progression_tick(&tank, dt);
+        int live = 0; for (int k = 0; k < MAX_FOOD; k++) live += tank.food[k].alive;
+        if (live > live_prev) fell += live - live_prev;
+        live_prev = live;
+    }
+    if (!fell) { printf("FAIL: AUTO FEED back on, and nothing fell for a hungry school\n"); return 1; }
+    remove(getenv("POCKET_TANK_SAVE"));
+    printf("hunger: AUTO FEED off: nothing falls, they beg then give up, trust wears to its floor (lit only), the keeper's pellets stop it; back on, %d fell. selftest-hunger ok\n", fell);
     return 0;
 }
 
@@ -4048,6 +4153,8 @@ int main(int argc, char **argv) {
             else if (r == SET_TAP_LIGHT) printf("lights out: %s\n", v ? "AUTO (the idle rule)" : "MANUAL (double-tap the glass, the default)");
             else if (r == SET_TAP_SCREEN) printf("screen: %s\n", v ? "TURNED" : "NORMAL");
             else if (r == SET_TAP_IDLE) printf("lights out after %d s still\n", v);
+            else if (r == SET_TAP_FEED) printf("auto feed: %s\n", v ? "ON" : "OFF");
+            else if (r == SET_TAP_ROTATE) printf("rotation: %s\n", v ? "LOCKED" : "unlocked");
         } else if (updates_view && !confirm_view) {              /* the UPDATES page: CHECK, FORGET, CLOSE */
             int r = updates_page_touch((float)mx, (float)my, mpress);
             if (r == UPD_TAP_CLOSE) { updates_view = false; settings_view = true; ms_back = true; }   /* back to the settings page */

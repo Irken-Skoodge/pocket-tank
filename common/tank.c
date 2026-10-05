@@ -5,6 +5,7 @@
 #include "tank_events.h"
 #include <math.h>
 #include <stddef.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define TAU 6.2831853f
@@ -347,6 +348,7 @@ void tank_init(tank_t *t, uint32_t seed) {
     t->reef_x   = TANK_FX0 + TANK_FW * 0.15f; t->reef_y   = TANK_BOT * 0.85f;
     t->clock = 0; t->night = false; t->idle_s = 0;
     t->light_idle_s = LIGHT_IDLE_S; t->light_auto = false; t->light_manual_off = false; t->light_tip_seen = false;
+    t->orient_lock = false; t->autofeed_off = false;
     t->screen_turned = false;
     t->light_override = false; t->light_on = true;
     t->hold_active = false; t->hold_time = 0; t->hold_approached = false;
@@ -926,6 +928,7 @@ static void snail_tick(tank_t *t, float dt) {
                                                                A hair off straight down keeps the sideways facing it had
                                                                (cos's sign) for the floor walk it lands in. */
         t->snail_heading = 1.5708f + (cosf(t->snail_heading) < 0 ? 0.001f : -0.001f);
+        t->snail_front = true;                              /* off the glass it stands where it was: in front of everything */
         t->snail_y = fminf(SNAIL_FLOOR_Y, t->snail_y + SNAIL_PX_S * dt);
     } else {                                                /* the floor walk, upright: along the bottom, a rest now and
                                                                then, a turn at each end (the facing lives in snail_heading) */
@@ -934,8 +937,12 @@ static void snail_tick(tank_t *t, float dt) {
         if (!resting) {
             float dir = cosf(t->snail_heading) < 0 ? -1.0f : 1.0f;
             t->snail_x += dir * SNAIL_AMBLE_PX_S * dt;
-            if (t->snail_x <= TANK_FX0 + SNAIL_MARGIN) { t->snail_x = TANK_FX0 + SNAIL_MARGIN; t->snail_heading = 0; }
-            if (t->snail_x >= TANK_FX1 - SNAIL_MARGIN) { t->snail_x = TANK_FX1 - SNAIL_MARGIN; t->snail_heading = 3.14159f; }
+            bool turned = false;
+            if (t->snail_x <= TANK_FX0 + SNAIL_MARGIN) { t->snail_x = TANK_FX0 + SNAIL_MARGIN; t->snail_heading = 0; turned = true; }
+            if (t->snail_x >= TANK_FX1 - SNAIL_MARGIN) { t->snail_x = TANK_FX1 - SNAIL_MARGIN; t->snail_heading = 3.14159f; turned = true; }
+            /* at each end it picks its lane for the walk back: in front of the IN FRONT pieces, or behind
+               them (from the clock's bits, not the tank's RNG: a seeded run is the same run) */
+            if (turned) t->snail_front = (((uint32_t)(t->clock * 997.0f) * 2654435761u) >> 20 & 1) != 0;
         }
     }
     snail_clamp(&t->snail_x, &t->snail_y, SNAIL_FLOOR_Y);
@@ -967,7 +974,7 @@ static void snail_sleep(tank_t *t, float seconds) {
 }
 void tank_snail_place(tank_t *t) {
     t->snail_x = TANK_FX0 + SNAIL_MARGIN + 10; t->snail_y = SNAIL_FLOOR_Y;   /* on the floor, bottom left, facing right */
-    t->snail_heading = 0; t->snail_cell = -1; t->snail_graze = 0;
+    t->snail_heading = 0; t->snail_cell = -1; t->snail_graze = 0; t->snail_front = true;
 }
 
 /* ---- the urchin (2026-10-02, SD_ITEM_URCHIN; tank.h has the rules) ----
@@ -1599,6 +1606,27 @@ void tank_light_auto(tank_t *t) { t->light_override = false; }
 /* the worn tank's way up (tank.h) */
 bool tank_screen_turned(const tank_t *t) { return TANK_WORN && t->screen_turned; }
 void tank_screen_set(tank_t *t, bool turned) { t->screen_turned = TANK_WORN && turned; }
+bool tank_orient(tank_t *t, bool live_inverted) {
+    if (!t->orient_lock) t->orient_inv = live_inverted;
+    return t->orient_inv;
+}
+void tank_orient_lock(tank_t *t, bool lock) { t->orient_lock = lock; }
+
+const int LIGHT_IDLE_CHOICES[LIGHT_IDLE_N] = { 5, 15, 30, 60, 180, 300, 600, 1800 };
+int tank_light_choice(const tank_t *t) {
+    if (!t->light_auto) return 0;
+    int best = 0;
+    for (int i = 1; i < LIGHT_IDLE_N; i++)
+        if (abs(LIGHT_IDLE_CHOICES[i] - t->light_idle_s) < abs(LIGHT_IDLE_CHOICES[best] - t->light_idle_s)) best = i;
+    return best + 1;
+}
+void tank_light_choice_set(tank_t *t, int choice) {
+    if (choice < 0) choice = 0;
+    if (choice > LIGHT_IDLE_N) choice = LIGHT_IDLE_N;
+    t->light_auto = choice > 0;
+    if (choice > 0) t->light_idle_s = LIGHT_IDLE_CHOICES[choice - 1];
+    t->light_manual_off = false;
+}
 
 void tank_scatter_food(tank_t *t, int n) {
     for (int i = 0; i < MAX_FOOD && n > 0; i++) {
@@ -2224,7 +2252,7 @@ void tank_tick(tank_t *t, float dt, advisor_fn advise) {
     float hungriest = 0;
     for (int i = 0; i < t->n_fish; i++)
         if (t->fish[i].hunger > hungriest) hungriest = t->fish[i].hunger;
-    bool hold = (t->ravenous && !t->ravenous_fed) || t->trickle_off;
+    bool hold = (t->ravenous && !t->ravenous_fed) || t->trickle_off || t->autofeed_off;   /* (AUTO FEED off: the keeper's alone, 0.3.2) */
     if (!hold && live_food < 2 && hungriest >= TRICKLE_HUNGER &&
         tank_randf(t, 0, 1) < TRICKLE_RATE * dt)
         tank_scatter_food(t, 1);

@@ -29,7 +29,7 @@ pipeline that made it, a PC simulator, and the firmware for a real board.
 Got the board? **[Install it from your browser](https://pocketank.com/install/)**,
 no toolchain needed.
 
-The current release is **v0.3.1** (alpha); the settings page shows the one
+The current release is **v0.3.2** (alpha); the settings page shows the one
 on your tank. What changed in each release:
 **[pocketank.com/updates](https://pocketank.com/updates/)**.
 
@@ -254,7 +254,8 @@ things to buy so far. The **sword plant** (40) is a fourth bed of broad
 leaves on the open floor, trimmed and grown and counted as cover like the
 grass. The **snail** (80) grazes the glass clean cell by cell, crawling
 flat across the pane with its head leading, and walks the floor upright
-when there is nothing to eat; it keeps working while the tank sleeps, so
+when there is nothing to eat, in front of a piece you placed IN FRONT or
+behind it as it pleases; it keeps working while the tank sleeps, so
 the glass is thinner in the morning. It is drawn the way the fish, the
 grass and the castle are, from a little geometry rather than a sprite, lit
 from the upper left and tinted by the water of its row, and it moves like
@@ -389,11 +390,18 @@ sale; they are permanent residents.
 in the dark the fish rest and the palette dims. The first time a double-tap
 turns the light off, a small LIGHTS OUT notice says what happened and how
 to turn it back on, once per tank. The settings page has a
-LIGHTS OUT option, AUTO, that hands the light to the tank instead: it
-knows when it is being handled (the motion sensor, or a touch) and goes
-dark by itself after a chosen number of still seconds, so a tank left on
-the desk is asleep until you pick it up. Six hours of device sleep in one
-stretch earns the tank its first full night's sleep.
+LIGHTS OUT row that can hand the light to the tank instead: step it from
+DOUBLE-TAP to a time, 5 seconds up to 30 minutes. The tank knows when it
+is being handled (the motion sensor, or a touch) and goes dark by itself
+after that long still, so a tank left on the desk is asleep until you pick
+it up. Six hours of device sleep in one stretch earns the tank its first
+full night's sleep.
+
+**Feeding is yours if you want it.** The tank drops a pellet now and then
+when someone is hungry, so nobody goes without. AUTO FEED on the settings
+page turns that off: then every meal is one you gave. Nobody dies of it,
+but a fish left starving in a lit tank slowly loses trust, and feeding it
+stops the loss.
 
 ![The battery page, charging](docs/media/sim-battery-page.png)
 
@@ -417,7 +425,10 @@ them. Below about 20% battery it asks you to plug in first. If an update
 ever goes wrong, the tank goes back to the version it had. The radio is
 only on during a check: the tank itself still runs with no network at all.
 On the watch, settings also has a SCREEN row: NORMAL, or TURNED if you wear
-it with the buttons toward your elbow.
+it with the buttons toward your elbow. The original and the pendant turn
+their picture over by themselves when you turn the tank over; the ROTATION
+button on the settings page (a padlock in a turning arrow) locks the
+picture the way up it is.
 
 ![The updates page](docs/media/sim-updates.png)
 ![Choosing a network](docs/media/sim-update-networks.png)
@@ -570,7 +581,7 @@ at the tail, and the one field that went in mid-struct is slid into place on
 load). To start over, hold BOOT and tap the glass for the *Reset tank?*
 prompt; the page also has an "erase and install fresh" button for a board
 that won't get that far. The settings page shows the release at its foot,
-small and dim ("V0.3.1 ALPHA", then the build id), so you can tell what
+small and dim ("V0.3.2 ALPHA", then the build id), so you can tell what
 you run. It is the same mechanism ESPHome and Home
 Assistant use ([ESP Web Tools](https://esphome.github.io/esp-web-tools/)),
 running entirely in the browser over Web Serial.

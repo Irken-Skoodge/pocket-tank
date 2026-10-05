@@ -278,11 +278,39 @@ bool touch_port_init(void) {
 #define CAL_X_GAIN 1.142f
 #define CAL_X_OFF  33.0f
 #define CAL_Y_GAIN 1.138f
-#define CAL_Y_OFF  22.0f
+#define CAL_Y_OFF  32.0f     /* (22 until 2026-10-04: the finger's landing is CAL_LAND deeper than the bias, below - upright the same map) */
 #define CAL_R_Y_GAIN 1.059f
-#define CAL_R_Y_OFF  3.0f
+/* The bowl turned over (2026-10-04, 27 presses, held in the hand, the picture
+ * turned): every press read 22 px LOW on the picture as shown (y = 0.977 t +
+ * 27.6, rms 5; x within its scatter). Upright, the panel's own offset and the
+ * finger's low landing were one number (+7 raw) and could not be told apart;
+ * turned over the landing changes sign and they can: the panel reports 15 px
+ * HIGH and a finger lands ~22 px low (the bias alone says 10). The same two
+ * numbers also give the 10-01 turned-over sitting, taken when the turn came
+ * before the map (+2 predicted, +0.1 measured). So on the bowl the landing is
+ * the bias + CAL_LAND more and the offset carries the panel's 15: upright
+ * the map is the one fitted on 10-01, (raw - 7) / 1.059, to the pixel.
+ * The 1.8 (V2) turned over, the same evening (27 presses, a second board):
+ * 19 px low over the two rows its panel reaches, which is the same finger -
+ * a landing of 21 px, the panel 33 high - so CAL_LAND is the calibrated
+ * boards' and the 1.8's offset carries the rest (upright unchanged). Checked
+ * with a fresh turned sitting on each at a landing of 22: the bowl +1 px, the
+ * 1.8 -5 on the rows its panel reaches - so 20 it is, between the two (the
+ * bowl +3, the 1.8 -2 by the arithmetic; the taps scatter 5..10). Turned over,
+ * the 1.8's panel runs out ~50 px above the picture's foot: a press aimed
+ * lower reads there. */
+#define CAL_LAND     10.0f
+#define CAL_R_Y_OFF  13.0f
 #define CAL_W_X_GAIN 0.963f
-#define CAL_W_X_OFF  (-14.8f)
+/* The watch TURNED (settings SCREEN, worn buttons toward the elbow), 2026-10-04,
+ * 27 presses worn: y on the cross (+1), x 17 px RIGHT of it. The other hand's
+ * finger comes at a worn watch from the same side whichever way round it is
+ * strapped, and lands ~8 px toward that side: upright that was inside the
+ * fit's 14.8, turned it doubles. So x has a landing of its own, turned with
+ * the picture like y's, and the offset keeps the panel's 6.8 (upright: the
+ * same map). y needed nothing: its landing is the bias's 10. */
+#define CAL_W_LAND_X 8.0f
+#define CAL_W_X_OFF  (-6.8f)
 #define CAL_W_Y_GAIN 0.957f
 #define CAL_W_Y_OFF  (-13.5f)
 static void cal_point(float rx, float ry, float *tx, float *ty);
@@ -292,7 +320,9 @@ static void cal_view(float rx, float ry, float *tx, float *ty) {
     if (s_inverted) { *tx = TANK_W - 1 - *tx; *ty = TANK_H - 1 - *ty; }
 }
 static void cal_point(float rx, float ry, float *tx, float *ty) {                 /* a raw tank-space report -> where the finger is */
-    ry -= s_inverted ? -s_bias_y : s_bias_y;          /* the finger's own low landing is the viewer's "down": turned, that is the panel's up */
+    float land = (float)s_bias_y + (board_is_round() || board_is_v2() ? CAL_LAND : 0);
+    ry -= s_inverted ? -land : land;                  /* the finger's own low landing is the viewer's "down": turned, that is the panel's up */
+    if (board_is_watch()) rx -= s_inverted ? -CAL_W_LAND_X : CAL_W_LAND_X;   /* ... and on a wrist it lands toward the tapping hand */
     if (board_is_round()) ry = (ry + CAL_R_Y_OFF) / CAL_R_Y_GAIN;
     else if (board_is_watch()) { rx = (rx + CAL_W_X_OFF) / CAL_W_X_GAIN; ry = (ry + CAL_W_Y_OFF) / CAL_W_Y_GAIN; }
     else if (board_is_v2()) { rx = (rx + CAL_X_OFF) / CAL_X_GAIN; ry = (ry + CAL_Y_OFF) / CAL_Y_GAIN; }
@@ -435,10 +465,11 @@ void touch_port_poll(tank_t *t) {
     if (s_set && !s_cf && !su) {                             /* the settings page owns the glass: segments, the seconds wheel, CLOSE */
         int v = 0, r = render_settings_touch(t, tx, ty, touched, &v);
         if (r) ESP_LOGI(TAG, "settings: %s %d", r == SET_TAP_CLOSE ? "CLOSE" : r == SET_TAP_BRIGHT ? "brightness" : r == SET_TAP_VOLUME ? "volume"
-                                                  : r == SET_TAP_LIGHT ? "lights out" : r == SET_TAP_SCREEN ? "screen (1 = turned)" : "idle seconds", v);
+                                                  : r == SET_TAP_LIGHT ? "lights out" : r == SET_TAP_SCREEN ? "screen (1 = turned)"
+                                                  : r == SET_TAP_FEED ? "auto feed (1 = on)" : r == SET_TAP_ROTATE ? "rotation (1 = locked)" : "idle seconds", v);
         if (r == SET_TAP_CLOSE) { s_set = false; s_ms = true; s_back = true; }   /* back to the milestones page (2026-09-16); the release is spent */
         else if (r == SET_TAP_UPDATES) { s_set = false; s_upd = true; s_back = true; ESP_LOGI(TAG, "updates page up"); }
-        else if (r == SET_TAP_BRIGHT || r == SET_TAP_VOLUME || r == SET_TAP_LIGHT || r == SET_TAP_IDLE) { s_set_what = r; s_set_val = v; }
+        else if (r == SET_TAP_BRIGHT || r == SET_TAP_VOLUME || r == SET_TAP_LIGHT || r == SET_TAP_IDLE || r == SET_TAP_FEED || r == SET_TAP_ROTATE) { s_set_what = r; s_set_val = v; }
     }
     if (s_upd && !s_cf && !su) {                             /* the UPDATES page: CHECK (main restarts), FORGET, CLOSE */
         int r = updates_page_touch(tx, ty, touched);

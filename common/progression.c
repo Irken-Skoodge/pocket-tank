@@ -8,6 +8,13 @@
 
 #define SAVE_MAGIC 0x50544b32u   /* "PTK2" (PTK1 saves are 4-fish, pre-population: start fresh) */
 #define RAVENOUS_GIVE_UP_S 150.0f  /* begging window before the fish give up */
+/* AUTO FEED off (0.3.2): nobody dies, but a fish left starving (hunger at
+ * STARVE_HUNGER or worse) in a lit, awake tank for longer than the grace
+ * loses trust, slowly, down to a floor a few feedings and holds win back. */
+#define STARVE_HUNGER      8.5f
+#define STARVE_GRACE_S     300.0f
+#define STARVE_TRUST_PER_S (1.0f / 1200.0f)   /* a point of trust per 20 min */
+#define STARVE_TRUST_FLOOR 2.0f
 #define SAVE_HEARTBEAT_S 600.0f
 #define SAVE_MIN_GAP_S   30.0f
 
@@ -133,7 +140,13 @@ typedef struct {
     int32_t  sale_meals_need;
     /* a worn tank's way up (2026-10-02, the watch: tank_screen_*): settings
      * SCREEN, 1 = TURNED. Older saves (and every other board) read 0: NORMAL. */
-    uint8_t  screen_turned, pad_screen[3];
+    uint8_t  screen_turned;
+    /* 0.3.2's two settings, in what was screen_turned's padding (every build
+     * wrote it as zeros, so older saves read the defaults; still 1688 B, and
+     * nothing moves for 0.4's tails after it): orient - bit 0 = ROTATION
+     * locked, bit 1 = the locked way up is turned over (tank_orient);
+     * autofeed_off - 1 = AUTO FEED off. */
+    uint8_t  orient, autofeed_off, pad_screen;
     /* the urchin (2026-10-02): its x on the floor (0 = not placed yet: it
      * starts by the reef bed) and the grass it has eaten, lifetime, in the
      * trim's px (its card). Older saves read zeros. */
@@ -219,7 +232,7 @@ SAVE_AT(saved_release, 1664);                                                   
 _Static_assert(sizeof(save_t) >= 1672, "SAVE LAYOUT LOCK: save_t only ever grows");
 SAVE_AT(sale_meals_need, 1668);                                                                        /* a fish sold, 10-01 */
 _Static_assert(sizeof(save_t) >= 1672, "SAVE LAYOUT LOCK: save_t only ever grows");
-SAVE_AT(screen_turned, 1672); SAVE_AT(pad_screen, 1673);                  /* the watch's way up, 10-02 */
+SAVE_AT(screen_turned, 1672); SAVE_AT(orient, 1673); SAVE_AT(autofeed_off, 1674); SAVE_AT(pad_screen, 1675);                  /* the watch's way up, 10-02 */
 _Static_assert(sizeof(save_t) >= 1680, "SAVE LAYOUT LOCK: save_t only ever grows");
 SAVE_AT(urchin_x, 1676); SAVE_AT(urchin_grazed_px, 1680);                                              /* the urchin, 10-02 */
 _Static_assert(sizeof(save_t) >= 1688, "SAVE LAYOUT LOCK: save_t only ever grows");
@@ -251,6 +264,10 @@ static bool  s_dirty;
 static bool  s_ravenous;             /* begging/frenzy active until everyone's fed / give-up */
 static float s_ravenous_t;           /* seconds spent begging (dash time excluded) */
 static int   s_rav_feedings0;        /* player_feedings when the episode began (tank.ravenous_fed) */
+static bool  s_gave_up;              /* AUTO FEED off: they begged, nobody came, nothing fell - no more begging
+                                        until the keeper feeds (s_gave_feedings0) or someone is no longer starving */
+static int   s_gave_feedings0;
+static float s_starve_s[N_FISH_MAX]; /* seconds each fish has been starving in a lit tank with AUTO FEED off */
 static bool  s_arrival_pending;
 static float s_spawn_in = -1;        /* seconds until the spawning starts (-1 = not counting) */
 static bool  s_prev_night;
@@ -632,7 +649,8 @@ void progression_fresh(tank_t *t) {
     t->tank_ms_bits = TMS_PAIR;
     for (int i = 0; i < t->n_fish; i++) { t->fish[i].ms_bits = MS_ARRIVED; apply_growth(&t->fish[i]); }
     s_arrival_pending = false; s_spawn_in = -1; s_prev_night = t->night;
-    s_ravenous = false; s_ravenous_t = 0;
+    s_ravenous = false; s_ravenous_t = 0; s_gave_up = false;
+    for (int i = 0; i < N_FISH_MAX; i++) s_starve_s[i] = 0;
     s_setup_pending = true;          /* a new tank: welcome, names, colours */
     s_newborn = -1;
     s_sd_prev_feedings = 0; s_sd_pending = 0;   /* a fresh ledger (tank_init zeroed the tank's) */
@@ -700,6 +718,8 @@ static bool load_save(tank_t *t, int64_t *saved_unix) {
     t->light_manual_off = !t->light_auto && sv.light_manual_off != 0;
     t->light_tip_seen = sv.light_tip_seen != 0;
     tank_screen_set(t, sv.screen_turned != 0);
+    t->orient_lock = (sv.orient & 1) != 0; if (t->orient_lock) t->orient_inv = (sv.orient & 2) != 0;
+    t->autofeed_off = sv.autofeed_off != 0;
     t->light_override = false; t->light_on = true;   /* never restored (2026-09-15): a saved
                                                       * override once froze a tank in permanent day */
     t->feed_spot_x = sv.feed_spot_x; t->player_feedings = sv.player_feedings;
@@ -841,7 +861,8 @@ void progression_tick(tank_t *t, float dt) {
     /* upkeep milestones + event saves (a chore done deserves to stick) */
     static int32_t s_prev_trims, s_prev_cleaned;
     if (t->trims > 0) set_tms(t, TMS_FIRST_TRIM);
-    if (t->cells_cleaned >= 30) set_tms(t, TMS_FIRST_CLEANING);
+    if (t->algae_colonies > 0) set_tms(t, TMS_FIRST_CLEANING);   /* the first colony wiped away, as the first cut is the first trimming
+                                                                    (0.3.2; it was 30 cells, hours of film on a new tank) */
     if ((t->sd_unlocks & SD_ITEM_SHRIMP) && t->shrimp_n >= SHRIMP_MAX) set_tms(t, TMS_FULL_SCHOOL);
     if (reef_visit) set_tms(t, TMS_FIRST_REEF);  /* a fish chose to look at the reef cluster */
     if (t->trims != s_prev_trims || t->cells_cleaned != s_prev_cleaned) {
@@ -859,7 +880,8 @@ void progression_tick(tank_t *t, float dt) {
     if (!s_ravenous && !any_food && t->n_fish > 0) {
         float mn = 10;
         for (int i = 0; i < t->n_fish; i++) if (t->fish[i].hunger < mn) mn = t->fish[i].hunger;
-        if (mn >= 8.5f) { s_ravenous = true; s_ravenous_t = 0; s_rav_feedings0 = t->player_feedings; }
+        if (s_gave_up && (!t->autofeed_off || mn < 8.5f || t->player_feedings != s_gave_feedings0)) s_gave_up = false;
+        if (mn >= 8.5f && !s_gave_up) { s_ravenous = true; s_ravenous_t = 0; s_rav_feedings0 = t->player_feedings; }
     }
     if (s_ravenous) {
         if (!any_food) s_ravenous_t += dt;    /* the wait; a dash for live pellets isn't giving up */
@@ -868,8 +890,19 @@ void progression_tick(tank_t *t, float dt) {
         if (mx < 7.0f) s_ravenous = false;                    /* everyone got a bite */
         else if (s_ravenous_t > RAVENOUS_GIVE_UP_S) {         /* nobody came: back to life */
             s_ravenous = false;
-            tank_scatter_food(t, 2);                          /* so it doesn't re-trigger at once */
+            if (!t->autofeed_off) tank_scatter_food(t, 2);    /* so it doesn't re-trigger at once */
+            else { s_gave_up = true; s_gave_feedings0 = t->player_feedings; }   /* AUTO FEED off: nothing falls; they
+                                                                 stop begging and go hungry until the keeper feeds */
         }
+    }
+    /* AUTO FEED off: going hungry costs trust (the constants' note above) */
+    for (int i = 0; i < t->n_fish; i++) {
+        fish_t *f = &t->fish[i];
+        if (!t->autofeed_off || f->hunger < STARVE_HUNGER) { s_starve_s[i] = 0; continue; }
+        if (t->night) continue;                               /* dark: they rest; the count holds */
+        s_starve_s[i] += dt;
+        if (s_starve_s[i] > STARVE_GRACE_S && f->trust > STARVE_TRUST_FLOOR)
+            f->trust = fmaxf(STARVE_TRUST_FLOOR, f->trust - STARVE_TRUST_PER_S * dt);
     }
     /* tank.c picks the presentation: empty water = beg at the surface; live
      * pellets = feeding-frenzy dash (real starving fish DART at fresh food) */
@@ -930,6 +963,8 @@ bool progression_save(tank_t *t) {
     sv.light_idle_s = (uint16_t)t->light_idle_s; sv.light_auto = t->light_auto; sv.light_manual_off = t->light_manual_off;
     sv.light_tip_seen = t->light_tip_seen;
     sv.screen_turned = t->screen_turned;
+    sv.orient = (uint8_t)(t->orient_lock ? 1 | (t->orient_inv ? 2 : 0) : 0);
+    sv.autofeed_off = t->autofeed_off;
     sv.arrival_pending = s_arrival_pending; sv.n_fish = (uint8_t)t->n_fish;
     sv.feed_spot_x = t->feed_spot_x; sv.player_feedings = t->player_feedings;
     sv.hold_approaches = t->hold_approaches; sv.tank_ms_bits = t->tank_ms_bits;

@@ -127,8 +127,8 @@ static void show_state(const tank_t *t) {
     for (int i = 0; i < MAX_FOOD; i++) pellets += t->food[i].alive;
     for (int i = 0; i < ALGAE_CELLS; i++) cells += t->algae[i] > 0;
     ESP_LOGI(TAG, "pellets %d | trickle %s | ravenous %d | %s%s idle %.0fs | veg %.2f %.2f %.2f | algae cells %d/%d | courting %s%s%s%s | arrival %s",
-             pellets, t->trickle_off ? "OFF" : "on", (int)t->ravenous,
-             t->night ? "night" : "day", t->light_override ? " (manual)" : "",
+             pellets, t->trickle_off ? "OFF" : t->autofeed_off ? "off (AUTO FEED off)" : "on", (int)t->ravenous,
+             t->night ? "night" : "day", t->light_override ? " (manual)" : t->orient_lock ? " (rotation locked)" : "",
              t->idle_s,
              t->veg_growth[0], t->veg_growth[1], t->veg_growth[2], cells, ALGAE_CELLS,
              t->courting ? t->fish[t->court_a].name : "no", t->courting ? "+" : "",
